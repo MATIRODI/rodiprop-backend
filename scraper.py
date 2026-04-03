@@ -1,218 +1,145 @@
-import requests
-from bs4 import BeautifulSoup
+from flask import Flask, jsonify, request
+from flask_cors import CORS
 import json
+import os
+import threading
 import time
-import random
-from datetime import datetime
+from scraper import scrape_mercadolibre, scrape_zonaprop, scrape_argenprop
 
-USER_AGENTS = [
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36",
-    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/121.0",
-    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15",
-]
+app = Flask(__name__)
+CORS(app)
 
-def get_headers():
-    return {
-        "User-Agent": random.choice(USER_AGENTS),
-        "Accept-Language": "es-AR,es;q=0.9,en;q=0.8",
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
-        "Accept-Encoding": "gzip, deflate, br",
-        "Connection": "keep-alive",
-        "Upgrade-Insecure-Requests": "1",
-        "Cache-Control": "max-age=0",
-    }
+DATA_FILE = "/tmp/propiedades.json"  # Usar /tmp que persiste más
 
-def pausa():
-    time.sleep(random.uniform(1.5, 3.5))
+def cargar_propiedades():
+    if os.path.exists(DATA_FILE):
+        with open(DATA_FILE, "r", encoding="utf-8") as f:
+            return json.load(f)
+    return []
 
-
-def scrape_mercadolibre(paginas=5):
-    propiedades = []
-    categorias = [
-        ("venta", "https://inmuebles.mercadolibre.com.ar/venta/cordoba/_Desde_{offset}_DisplayType_G"),
-        ("alquiler", "https://inmuebles.mercadolibre.com.ar/alquiler/cordoba/_Desde_{offset}_DisplayType_G"),
-    ]
-    for operacion, url_template in categorias:
-        for pagina in range(paginas):
-            offset = pagina * 48 + 1
-            url = url_template.format(offset=offset)
-            try:
-                resp = requests.get(url, headers=get_headers(), timeout=20)
-                if resp.status_code != 200:
-                    continue
-                soup = BeautifulSoup(resp.text, "html.parser")
-                cards = soup.select(".ui-search-layout__item")
-                for card in cards:
-                    try:
-                        prop = {}
-                        titulo = card.select_one(".poly-component__title")
-                        prop["titulo"] = titulo.text.strip() if titulo else ""
-                        precio = card.select_one(".andes-money-amount__fraction")
-                        moneda = card.select_one(".andes-money-amount__currency-symbol")
-                        prop["precio"] = precio.text.strip().replace(".", "").replace(",", "") if precio else ""
-                        prop["moneda"] = moneda.text.strip() if moneda else "USD"
-                        ubicacion = card.select_one(".poly-component__location")
-                        prop["ubicacion"] = ubicacion.text.strip() if ubicacion else ""
-                        attrs = card.select(".poly-attributes-list__item")
-                        prop["atributos"] = [a.text.strip() for a in attrs]
-                        link = card.select_one("a.poly-component__title")
-                        prop["url"] = link["href"] if link else ""
-                        img = card.select_one("img.poly-component__picture")
-                        prop["imagen"] = (img.get("data-src") or img.get("src", "")) if img else ""
-                        prop["fuente"] = "MercadoLibre"
-                        prop["operacion"] = operacion
-                        prop["fecha_scrape"] = datetime.now().isoformat()
-                        if prop["titulo"] and prop["precio"]:
-                            propiedades.append(prop)
-                    except:
-                        continue
-                print(f"✅ ML {operacion} pág {pagina+1}: {len(cards)} props")
-                pausa()
-            except Exception as e:
-                print(f"❌ ML error: {e}")
-    return propiedades
-
-
-def scrape_zonaprop(paginas=5):
-    propiedades = []
-    categorias = [
-        ("venta", "https://www.zonaprop.com.ar/inmuebles-venta-cordoba-capital-pagina-{pagina}.html"),
-        ("alquiler", "https://www.zonaprop.com.ar/inmuebles-alquiler-cordoba-capital-pagina-{pagina}.html"),
-    ]
-    session = requests.Session()
-    try:
-        session.get("https://www.zonaprop.com.ar", headers=get_headers(), timeout=15)
-        pausa()
-    except:
-        pass
-    for operacion, url_template in categorias:
-        for pagina in range(1, paginas + 1):
-            url = url_template.format(pagina=pagina)
-            try:
-                resp = session.get(url, headers=get_headers(), timeout=20)
-                if resp.status_code in [403, 429]:
-                    print(f"ZP bloqueado pág {pagina}")
-                    break
-                if resp.status_code != 200:
-                    continue
-                soup = BeautifulSoup(resp.text, "html.parser")
-                cards = soup.select("div[data-id]") or soup.select(".postingCardLayout") or soup.select("[class*='postingCard']")
-                for card in cards:
-                    try:
-                        prop = {}
-                        precio_el = card.select_one("[data-price]") or card.select_one(".firstPrice") or card.select_one("[class*='price']")
-                        prop["precio"] = (precio_el.get("data-price") or precio_el.text.strip().replace(".", "").replace("$", "").strip()) if precio_el else ""
-                        prop["moneda"] = "USD"
-                        titulo = card.select_one(".postingCardTitle") or card.select_one("[class*='Title']") or card.select_one("h2")
-                        prop["titulo"] = titulo.text.strip() if titulo else ""
-                        ubicacion = card.select_one(".postingCardLocation") or card.select_one("[class*='Location']")
-                        prop["ubicacion"] = ubicacion.text.strip() if ubicacion else ""
-                        attrs = card.select(".postingCardAttribute") or card.select("[class*='Attribute']")
-                        prop["atributos"] = [a.text.strip() for a in attrs]
-                        link = card.select_one("a[href*='/propiedades/']") or card.select_one("a")
-                        if link and link.get("href"):
-                            href = link["href"]
-                            prop["url"] = href if href.startswith("http") else "https://www.zonaprop.com.ar" + href
-                        else:
-                            prop["url"] = ""
-                        img = card.select_one("img")
-                        prop["imagen"] = (img.get("data-src") or img.get("src", "")) if img else ""
-                        prop["fuente"] = "ZonaProp"
-                        prop["operacion"] = operacion
-                        prop["fecha_scrape"] = datetime.now().isoformat()
-                        if prop["titulo"] or prop["precio"]:
-                            propiedades.append(prop)
-                    except:
-                        continue
-                print(f"✅ ZP {operacion} pág {pagina}: {len(cards)} props")
-                pausa()
-            except Exception as e:
-                print(f"❌ ZP error: {e}")
-    return propiedades
-
-
-def scrape_argenprop(paginas=5):
-    propiedades = []
-    categorias = [
-        ("venta", "https://www.argenprop.com/departamento-y-casa-y-ph-en-venta-en-cordoba--pagina-{pagina}"),
-        ("alquiler", "https://www.argenprop.com/departamento-y-casa-y-ph-en-alquiler-en-cordoba--pagina-{pagina}"),
-    ]
-    session = requests.Session()
-    try:
-        session.get("https://www.argenprop.com", headers=get_headers(), timeout=15)
-        pausa()
-    except:
-        pass
-    for operacion, url_template in categorias:
-        for pagina in range(1, paginas + 1):
-            url = url_template.format(pagina=pagina)
-            try:
-                resp = session.get(url, headers=get_headers(), timeout=20)
-                if resp.status_code in [403, 429]:
-                    print(f"AP bloqueado pág {pagina}")
-                    break
-                if resp.status_code != 200:
-                    continue
-                soup = BeautifulSoup(resp.text, "html.parser")
-                cards = soup.select(".listing__item") or soup.select("[class*='listing-item']") or soup.select("article")
-                for card in cards:
-                    try:
-                        prop = {}
-                        precio_el = card.select_one(".card__price") or card.select_one("[class*='price']")
-                        prop["precio"] = precio_el.text.strip().replace(".", "").replace("$", "").replace("USD", "").strip() if precio_el else ""
-                        prop["moneda"] = "USD"
-                        titulo = card.select_one(".card__title") or card.select_one("h2") or card.select_one("[class*='title']")
-                        prop["titulo"] = titulo.text.strip() if titulo else ""
-                        ubicacion = card.select_one(".card__address") or card.select_one("[class*='address']")
-                        prop["ubicacion"] = ubicacion.text.strip() if ubicacion else ""
-                        attrs = card.select(".card__common-data li") or card.select("[class*='feature']")
-                        prop["atributos"] = [a.text.strip() for a in attrs]
-                        link = card.select_one("a[href]")
-                        if link:
-                            href = link["href"]
-                            prop["url"] = href if href.startswith("http") else "https://www.argenprop.com" + href
-                        else:
-                            prop["url"] = ""
-                        img = card.select_one("img")
-                        prop["imagen"] = (img.get("data-src") or img.get("src", "")) if img else ""
-                        prop["fuente"] = "ArgenProp"
-                        prop["operacion"] = operacion
-                        prop["fecha_scrape"] = datetime.now().isoformat()
-                        if prop["titulo"] or prop["precio"]:
-                            propiedades.append(prop)
-                    except:
-                        continue
-                print(f"✅ AP {operacion} pág {pagina}: {len(cards)} props")
-                pausa()
-            except Exception as e:
-                print(f"❌ AP error: {e}")
-    return propiedades
-
-
-def guardar_json(propiedades, archivo="propiedades.json"):
+def guardar_propiedades(props):
+    # Deduplicar
     vistas = set()
     unicas = []
-    for p in propiedades:
+    for p in props:
         key = p.get("url") or p.get("titulo", "") + p.get("precio", "")
         if key and key not in vistas:
             vistas.add(key)
             unicas.append(p)
-    with open(archivo, "w", encoding="utf-8") as f:
+    with open(DATA_FILE, "w", encoding="utf-8") as f:
         json.dump(unicas, f, ensure_ascii=False, indent=2)
-    print(f"\n💾 Guardadas {len(unicas)} propiedades únicas en {archivo}")
+    print(f"💾 {len(unicas)} propiedades guardadas en {DATA_FILE}")
     return unicas
 
+def scraper_automatico():
+    """Corre el scraper cada 2 horas"""
+    while True:
+        try:
+            print("🔄 Actualizando propiedades...")
+            todas = []
+            
+            props_ml = scrape_mercadolibre(paginas=5)
+            print(f"ML: {len(props_ml)}")
+            todas.extend(props_ml)
+            
+            props_zp = scrape_zonaprop(paginas=3)
+            print(f"ZP: {len(props_zp)}")
+            todas.extend(props_zp)
+            
+            props_ap = scrape_argenprop(paginas=3)
+            print(f"AP: {len(props_ap)}")
+            todas.extend(props_ap)
+            
+            unicas = guardar_propiedades(todas)
+            print(f"✅ Total: {len(unicas)} propiedades únicas")
+        except Exception as e:
+            print(f"❌ Error scraper: {e}")
+        
+        time.sleep(7200)  # 2 horas
+
+@app.route("/")
+def home():
+    props = cargar_propiedades()
+    return jsonify({"status": "RodiProp API funcionando", "version": "2.0", "total": len(props)})
+
+@app.route("/api/propiedades")
+def propiedades():
+    props = cargar_propiedades()
+    zona = request.args.get("zona", "").lower()
+    tipo = request.args.get("tipo", "").lower()
+    operacion = request.args.get("operacion", "").lower()
+    fuente = request.args.get("fuente", "").lower()
+    precio_min = request.args.get("precio_min", 0, type=int)
+    precio_max = request.args.get("precio_max", 99999999, type=int)
+    limit = request.args.get("limit", 50, type=int)
+
+    filtradas = []
+    for p in props:
+        titulo = p.get("titulo", "").lower()
+        ubicacion = p.get("ubicacion", "").lower()
+        if zona and zona not in ubicacion and zona not in titulo:
+            continue
+        if tipo and tipo not in titulo:
+            continue
+        if operacion and operacion != p.get("operacion", "").lower():
+            continue
+        if fuente and fuente.lower() not in p.get("fuente", "").lower():
+            continue
+        try:
+            precio = int(str(p.get("precio", "0")).replace(".", "").replace(",", "").strip() or "0")
+            if precio_min and precio < precio_min:
+                continue
+            if precio_max < 99999999 and precio > precio_max:
+                continue
+        except:
+            pass
+        filtradas.append(p)
+
+    return jsonify({
+        "total": len(filtradas),
+        "propiedades": filtradas[:limit],
+        "fuentes": list(set(p.get("fuente", "") for p in props))
+    })
+
+@app.route("/api/stats")
+def stats():
+    props = cargar_propiedades()
+    fuentes = {}
+    operaciones = {}
+    for p in props:
+        f = p.get("fuente", "Otro")
+        fuentes[f] = fuentes.get(f, 0) + 1
+        o = p.get("operacion", "otro")
+        operaciones[o] = operaciones.get(o, 0) + 1
+    return jsonify({
+        "total": len(props),
+        "por_fuente": fuentes,
+        "por_operacion": operaciones
+    })
+
+@app.route("/api/scraper/ejecutar", methods=["GET", "POST"])
+def ejecutar_scraper():
+    def run():
+        try:
+            todas = []
+            props_ml = scrape_mercadolibre(paginas=3)
+            todas.extend(props_ml)
+            props_zp = scrape_zonaprop(paginas=3)
+            todas.extend(props_zp)
+            props_ap = scrape_argenprop(paginas=3)
+            todas.extend(props_ap)
+            guardar_propiedades(todas)
+            print(f"✅ Scraper completado: {len(todas)} props")
+        except Exception as e:
+            print(f"❌ Error: {e}")
+    
+    threading.Thread(target=run, daemon=True).start()
+    return jsonify({"status": "Scraper iniciado en background"})
+
+# Arrancar scraper al iniciar
+scraper_thread = threading.Thread(target=scraper_automatico, daemon=True)
+scraper_thread.start()
 
 if __name__ == "__main__":
-    print("🔍 RodiProp Scraper v2")
-    print("=" * 50)
-    props_ml = scrape_mercadolibre(paginas=5)
-    print(f"ML: {len(props_ml)}")
-    props_zp = scrape_zonaprop(paginas=5)
-    print(f"ZP: {len(props_zp)}")
-    props_ap = scrape_argenprop(paginas=5)
-    print(f"AP: {len(props_ap)}")
-    todas = props_ml + props_zp + props_ap
-    guardar_json(todas)
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host="0.0.0.0", port=port)
