@@ -192,7 +192,7 @@ def scrape_ap(paginas=3):
     for op in ["venta", "alquiler"]:
         for i in range(1, paginas+1):
             try:
-                url = f"https://www.argenprop.com/departamento-y-casa-en-{op}-en-cordoba--pagina-{i}"
+                url = f"https://www.argenprop.com/departamento-y-casa-en-{op}-en-cordoba-capital--pagina-{i}"
                 r = s.get(url, headers=get_headers(), timeout=15)
                 if r.status_code == 403: break
                 soup = BeautifulSoup(r.text, "html.parser")
