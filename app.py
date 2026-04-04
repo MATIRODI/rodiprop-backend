@@ -5,10 +5,15 @@ from bs4 import BeautifulSoup
 from datetime import datetime
 import pg8000.dbapi as pg
 
+# Twilio config
+TWILIO_SID = os.environ.get("TWILIO_SID", "")
+TWILIO_TOKEN = os.environ.get("TWILIO_TOKEN", "")
+TWILIO_WA = os.environ.get("TWILIO_WA", "whatsapp:+14155238886")
+
 app = Flask(__name__)
 CORS(app)
 
-DB_URL = os.environ.get("DATABASE_URL", "postgresql://postgres:eVWzxoJJMSiSkdoZxEuSNQmmaWVGlvPk@postgres.railway.internal:5432/railway")
+DB_URL = os.environ.get("DATABASE_URL", "")
 
 USER_AGENTS = [
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36",
@@ -377,6 +382,96 @@ def scrape_lavoz(paginas=5):
     return props
 
 
+def enviar_whatsapp(numero, mensaje):
+    """Envía WhatsApp via Twilio"""
+    try:
+        import urllib.request, urllib.parse, base64
+        url = f"https://api.twilio.com/2010-04-01/Accounts/{TWILIO_SID}/Messages.json"
+        data = urllib.parse.urlencode({
+            "From": TWILIO_WA,
+            "To": f"whatsapp:+549{numero}" if not numero.startswith("+") else f"whatsapp:{numero}",
+            "Body": mensaje
+        }).encode()
+        credentials = base64.b64encode(f"{TWILIO_SID}:{TWILIO_TOKEN}".encode()).decode()
+        req = urllib.request.Request(url, data=data, method="POST")
+        req.add_header("Authorization", f"Basic {credentials}")
+        req.add_header("Content-Type", "application/x-www-form-urlencoded")
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            result = json.loads(resp.read())
+            print(f"✅ WA enviado a {numero}: {result.get('sid','')}")
+            return True
+    except Exception as e:
+        print(f"❌ WA error a {numero}: {e}")
+        return False
+
+def chequear_alertas():
+    """Chequea usuarios y envía alertas de nuevas propiedades"""
+    try:
+        conn = get_conn()
+        cur = conn.cursor()
+        cur.execute("SELECT id,nombre,email,whatsapp,zona,tipo,operacion FROM usuarios WHERE activo=TRUE AND whatsapp != ''")
+        cols = ["id","nombre","email","whatsapp","zona","tipo","operacion"]
+        usuarios = [dict(zip(cols, row)) for row in cur.fetchall()]
+        cur.close()
+        conn.close()
+
+        for u in usuarios:
+            try:
+                # Buscar propiedades nuevas (últimas 2 horas) que matcheen
+                conn2 = get_conn()
+                cur2 = conn2.cursor()
+                query = """
+                    SELECT titulo, precio, moneda, ubicacion, url, fuente 
+                    FROM propiedades 
+                    WHERE fecha > NOW() - INTERVAL '2 hours'
+                """
+                params = []
+                if u.get("zona"):
+                    query += " AND (LOWER(ubicacion) LIKE %s OR LOWER(titulo) LIKE %s)"
+                    params += [f"%{u['zona'].lower()}%", f"%{u['zona'].lower()}%"]
+                if u.get("tipo"):
+                    query += " AND LOWER(titulo) LIKE %s"
+                    params.append(f"%{u['tipo'].lower()}%")
+                if u.get("operacion"):
+                    query += " AND LOWER(operacion) = %s"
+                    params.append(u["operacion"].lower())
+                query += " AND url NOT IN (SELECT propiedad_url FROM alertas_enviadas WHERE usuario_id=%s)"
+                params.append(u["id"])
+                query += " LIMIT 3"
+                cur2.execute(query, params)
+                props = cur2.fetchall()
+
+                for prop in props:
+                    titulo, precio, moneda, ubicacion, url, fuente = prop
+                    precio_str = f"{moneda} {int(precio):,}" if precio and precio.isdigit() else precio or "Consultar"
+                    mensaje = f"""🏠 *RodiProp — Nueva propiedad!*
+
+{titulo}
+📍 {ubicacion}
+💰 {precio_str}
+🔗 {url}
+
+_Fuente: {fuente}_
+_Buscabas: {u.get('zona','')} · {u.get('tipo','')} · {u.get('operacion','')}_
+
+Para pausar alertas respondé STOP"""
+
+                    if enviar_whatsapp(u["whatsapp"], mensaje):
+                        cur2.execute(
+                            "INSERT INTO alertas_enviadas (usuario_id, propiedad_url) VALUES (%s,%s) ON CONFLICT DO NOTHING",
+                            (u["id"], url)
+                        )
+                        conn2.commit()
+
+                cur2.close()
+                conn2.close()
+            except Exception as e:
+                print(f"Error alertas usuario {u['id']}: {e}")
+
+        print(f"✅ Alertas chequeadas para {len(usuarios)} usuarios")
+    except Exception as e:
+        print(f"Error chequear alertas: {e}")
+
 def run_scraper():
     print("🔍 Scraper v2 iniciando — 4 fuentes...")
     todas = []
@@ -406,8 +501,11 @@ def run_scraper():
 def auto_scraper():
     time.sleep(10)
     while True:
-        try: run_scraper()
-        except Exception as e: print(f"Auto error: {e}")
+        try:
+            run_scraper()
+            chequear_alertas()
+        except Exception as e:
+            print(f"Auto error: {e}")
         time.sleep(7200)
 
 try:
@@ -499,6 +597,12 @@ def lista_usuarios():
         return jsonify({"total": len(rows), "usuarios": rows})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+@app.route("/api/alertas/test", methods=["GET","POST"])
+def test_alerta():
+    """Envía alerta de prueba al primer usuario"""
+    threading.Thread(target=chequear_alertas, daemon=True).start()
+    return jsonify({"status": "Chequeando alertas en background"})
 
 @app.route("/api/usuarios/stats")
 def usuarios_stats():
