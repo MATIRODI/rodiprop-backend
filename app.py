@@ -162,26 +162,26 @@ def scrape_ml(paginas=3):
             for i in range(paginas):
                 try:
                     url = f"https://inmuebles.mercadolibre.com.ar/{op}/{localidad}/_Desde_{i*48+1}_DisplayType_G"
-                r = requests.get(url, headers=get_headers(), timeout=15)
-                soup = BeautifulSoup(r.text, "html.parser")
-                for card in soup.select(".ui-search-layout__item"):
-                    try:
-                        t = card.select_one(".poly-component__title")
-                        p = card.select_one(".andes-money-amount__fraction")
-                        m = card.select_one(".andes-money-amount__currency-symbol")
-                        u = card.select_one(".poly-component__location")
-                        l = card.select_one("a.poly-component__title")
-                        img = card.select_one("img.poly-component__picture")
-                        attrs = card.select(".poly-attributes-list__item")
-                        if t and p:
-                            props.append({"titulo": t.text.strip(), "precio": p.text.strip().replace(".","").replace(",",""),
-                                "moneda": m.text.strip() if m else "USD", "ubicacion": u.text.strip() if u else "",
-                                "url": l["href"] if l else "", "imagen": (img.get("data-src") or img.get("src","")) if img else "",
-                                "fuente": "MercadoLibre", "operacion": op, "atributos": [a.text.strip() for a in attrs]})
-                    except: pass
-                print(f"✅ ML {op}/{localidad} p{i+1}: {len(props)}")
-                time.sleep(random.uniform(1, 2))
-            except Exception as e: print(f"❌ ML {localidad}: {e}")
+                    r = requests.get(url, headers=get_headers(), timeout=15)
+                    soup = BeautifulSoup(r.text, "html.parser")
+                    for card in soup.select(".ui-search-layout__item"):
+                        try:
+                            t = card.select_one(".poly-component__title")
+                            p = card.select_one(".andes-money-amount__fraction")
+                            m = card.select_one(".andes-money-amount__currency-symbol")
+                            u = card.select_one(".poly-component__location")
+                            l = card.select_one("a.poly-component__title")
+                            img = card.select_one("img.poly-component__picture")
+                            attrs = card.select(".poly-attributes-list__item")
+                            if t and p:
+                                props.append({"titulo": t.text.strip(), "precio": p.text.strip().replace(".","").replace(",",""),
+                                    "moneda": m.text.strip() if m else "USD", "ubicacion": u.text.strip() if u else "",
+                                    "url": l["href"] if l else "", "imagen": (img.get("data-src") or img.get("src","")) if img else "",
+                                    "fuente": "MercadoLibre", "operacion": op, "atributos": [a.text.strip() for a in attrs]})
+                        except: pass
+                    print(f"✅ ML {op}/{localidad} p{i+1}: {len(props)}")
+                    time.sleep(random.uniform(1, 2))
+                except Exception as e: print(f"❌ ML {localidad}: {e}")
     return props
 
 def scrape_ap(paginas=5):
