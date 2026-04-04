@@ -63,10 +63,34 @@ def init_db():
             fecha TIMESTAMP DEFAULT NOW()
         )
     """)
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS usuarios (
+            id SERIAL PRIMARY KEY,
+            nombre TEXT,
+            email TEXT UNIQUE,
+            whatsapp TEXT,
+            zona TEXT,
+            tipo TEXT,
+            operacion TEXT DEFAULT 'venta',
+            precio_min INTEGER DEFAULT 0,
+            precio_max INTEGER DEFAULT 999999999,
+            activo BOOLEAN DEFAULT TRUE,
+            plan TEXT DEFAULT 'gratis',
+            fecha TIMESTAMP DEFAULT NOW()
+        )
+    """)
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS alertas_enviadas (
+            id SERIAL PRIMARY KEY,
+            usuario_id INTEGER,
+            propiedad_url TEXT,
+            fecha TIMESTAMP DEFAULT NOW()
+        )
+    """)
     conn.commit()
     cur.close()
     conn.close()
-    print("✅ DB inicializada")
+    print("✅ DB inicializada con usuarios y alertas")
 
 def guardar_props(props):
     conn = get_conn()
@@ -416,6 +440,80 @@ def stats():
 def trigger():
     threading.Thread(target=run_scraper, daemon=True).start()
     return jsonify({"status": "Scraper iniciado — 4 fuentes: ML + AP + ZP + LaVoz"})
+
+@app.route("/api/usuarios/registro", methods=["POST", "OPTIONS"])
+def registro():
+    if request.method == "OPTIONS":
+        return jsonify({}), 200
+    data = request.get_json()
+    if not data:
+        return jsonify({"error": "Datos requeridos"}), 400
+    email = data.get("email","").strip().lower()
+    if not email:
+        return jsonify({"error": "Email requerido"}), 400
+    try:
+        conn = get_conn()
+        cur = conn.cursor()
+        cur.execute("""
+            INSERT INTO usuarios (nombre, email, whatsapp, zona, tipo, operacion, precio_min, precio_max)
+            VALUES (%s,%s,%s,%s,%s,%s,%s,%s)
+            ON CONFLICT (email) DO UPDATE SET
+                nombre=EXCLUDED.nombre,
+                whatsapp=EXCLUDED.whatsapp,
+                zona=EXCLUDED.zona,
+                tipo=EXCLUDED.tipo,
+                operacion=EXCLUDED.operacion,
+                precio_min=EXCLUDED.precio_min,
+                precio_max=EXCLUDED.precio_max,
+                activo=TRUE
+        """, (
+            data.get("nombre",""),
+            email,
+            data.get("whatsapp",""),
+            data.get("zona",""),
+            data.get("tipo",""),
+            data.get("operacion","venta"),
+            int(data.get("precio_min", 0) or 0),
+            int(data.get("precio_max", 999999999) or 999999999),
+        ))
+        conn.commit()
+        cur.close()
+        conn.close()
+        return jsonify({"status": "ok", "mensaje": "¡Alerta creada! Te avisamos cuando aparezca algo."})
+    except Exception as e:
+        print(f"Registro error: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/api/usuarios/lista")
+def lista_usuarios():
+    try:
+        conn = get_conn()
+        cur = conn.cursor()
+        cur.execute("SELECT id,nombre,email,whatsapp,zona,tipo,operacion,precio_min,precio_max,plan,fecha FROM usuarios ORDER BY fecha DESC")
+        cols = ["id","nombre","email","whatsapp","zona","tipo","operacion","precio_min","precio_max","plan","fecha"]
+        rows = [dict(zip(cols, row)) for row in cur.fetchall()]
+        cur.close()
+        conn.close()
+        for r in rows:
+            if r.get("fecha"): r["fecha"] = str(r["fecha"])
+        return jsonify({"total": len(rows), "usuarios": rows})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/api/usuarios/stats")
+def usuarios_stats():
+    try:
+        conn = get_conn()
+        cur = conn.cursor()
+        cur.execute("SELECT COUNT(*) FROM usuarios WHERE activo=TRUE")
+        total = cur.fetchone()[0]
+        cur.execute("SELECT COUNT(*) FROM usuarios WHERE plan='premium'")
+        premium = cur.fetchone()[0]
+        cur.close()
+        conn.close()
+        return jsonify({"total_usuarios": total, "premium": premium, "gratis": total - premium})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT",5000)))
