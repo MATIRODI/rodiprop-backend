@@ -19,4 +19,4 @@ API de scraping de propiedades para Córdoba.
 - ?precio_min=50000&precio_max=150000
 - ?fuente=MercadoLibre
 - ?limit=20
-# v2
+# v3
