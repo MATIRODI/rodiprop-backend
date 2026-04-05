@@ -518,7 +518,7 @@ def auto_scraper():
 def home():
     return jsonify({
         "status": "RodiProp API OK",
-        "version": "8.0",
+        "version": "8.1",
         "pg_host": PG_HOST,
         "total": contar_props(),
         "mp": "activo" if MP_ACCESS_TOKEN else "pendiente-credenciales",
