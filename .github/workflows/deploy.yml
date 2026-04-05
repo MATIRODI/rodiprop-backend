@@ -1,0 +1,87 @@
+name: RodiProp Auto Deploy
+
+on:
+  push:
+    branches:
+      - deploy
+
+jobs:
+  validar-y-mergear:
+    runs-on: ubuntu-latest
+    name: Validar sintaxis y mergear a main
+
+    steps:
+      - name: Checkout rama deploy
+        uses: actions/checkout@v4
+        with:
+          ref: deploy
+          fetch-depth: 0
+
+      - name: Configurar Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Instalar dependencias
+        run: pip install flask flask-cors requests beautifulsoup4 pg8000
+
+      - name: Verificar sintaxis Python
+        run: |
+          python3 - << 'EOF'
+          import ast, sys
+          files = ['app.py']
+          for f in files:
+              try:
+                  with open(f) as fh:
+                      source = fh.read()
+                  ast.parse(source)
+                  print('OK ' + f)
+              except SyntaxError as e:
+                  print('SYNTAX ERROR ' + f + ': ' + str(e))
+                  sys.exit(1)
+              except FileNotFoundError:
+                  print('NOT FOUND ' + f)
+                  sys.exit(1)
+          print('Todos los checks pasaron')
+          EOF
+
+      - name: Verificar imports críticos
+        run: |
+          python3 -c "
+          import ast
+          with open('app.py') as f:
+              code = f.read()
+          checks = [
+              'def get_conn',
+              'def init_db',
+              'def enviar_whatsapp',
+              'def mp_request',
+              'def registrar_pago_db',
+              '/api/pagos/crear',
+              '/api/pagos/webhook',
+              'CREATE TABLE IF NOT EXISTS pagos',
+              'MP_ACCESS_TOKEN',
+          ]
+          faltantes = [c for c in checks if c not in code]
+          if faltantes:
+              print('FALTA en app.py:')
+              for f in faltantes:
+                  print('  - ' + f)
+              exit(1)
+          print('Estructura del app.py verificada correctamente')
+          "
+
+      - name: Mergear deploy -> main
+        run: |
+          git config user.name "RodiProp Bot"
+          git config user.email "bot@rodiprop.com"
+          git checkout main
+          git merge deploy --no-ff -m "deploy: auto-merge desde rama deploy [skip ci]"
+          git push origin main
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Notificar éxito
+        run: |
+          echo "Deploy completado exitosamente"
+          echo "Railway va a detectar el push a main y redeploy automaticamente"
