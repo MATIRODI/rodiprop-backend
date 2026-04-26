@@ -919,6 +919,15 @@ except Exception as e:
     print("DB init error: " + str(e))
 
 threading.Thread(target=auto_scraper, daemon=True).start()
-
+@app.route("/api/admin/auth", methods=["POST", "OPTIONS"])
+def admin_auth():
+    if request.method == "OPTIONS":
+        return jsonify({}), 200
+    data = request.get_json()
+    pwd = data.get("password", "")
+    admin_pwd = os.environ.get("ADMIN_PASSWORD", "")
+    if pwd == admin_pwd:
+        return jsonify({"ok": True})
+    return jsonify({"ok": False}), 401
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
