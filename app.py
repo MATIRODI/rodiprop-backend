@@ -18,6 +18,7 @@ PG_PORT = int(os.environ.get("PGPORT", "5432"))
 TWILIO_SID   = os.environ.get("TWILIO_SID", "")
 TWILIO_TOKEN = os.environ.get("TWILIO_TOKEN", "")
 TWILIO_WA    = os.environ.get("TWILIO_WA", "whatsapp:+14155238886")
+WA_SERVICE_URL = os.environ.get("WA_SERVICE_URL", "https://grateful-unity-production-1f47.up.railway.app")
 
 # Mercado Pago — agregar en Railway: MP_ACCESS_TOKEN, MP_CLIENT_SECRET
 MP_ACCESS_TOKEN  = os.environ.get("MP_ACCESS_TOKEN", "")
@@ -202,16 +203,14 @@ def stats_db():
 
 def enviar_whatsapp(numero, mensaje):
     try:
-        url = "https://api.twilio.com/2010-04-01/Accounts/" + TWILIO_SID + "/Messages.json"
-        to = "whatsapp:+549" + numero if not numero.startswith("+") else "whatsapp:" + numero
-        data = urllib.parse.urlencode({"From": TWILIO_WA, "To": to, "Body": mensaje}).encode()
-        credentials = base64.b64encode((TWILIO_SID + ":" + TWILIO_TOKEN).encode()).decode()
+        url = WA_SERVICE_URL + "/send"
+        numero_limpio = numero.replace("+549", "").replace("+54", "").replace("+", "")
+        data = json.dumps({"numero": numero_limpio, "mensaje": mensaje}).encode()
         req = urllib.request.Request(url, data=data, method="POST")
-        req.add_header("Authorization", "Basic " + credentials)
-        req.add_header("Content-Type", "application/x-www-form-urlencoded")
+        req.add_header("Content-Type", "application/json")
         with urllib.request.urlopen(req, timeout=10) as resp:
             result = json.loads(resp.read())
-        print("WA enviado a " + str(numero) + ": " + str(result.get("sid", "")))
+        print("WA enviado a " + str(numero) + ": " + str(result))
         return True
     except Exception as e:
         print("WA error: " + str(e))
