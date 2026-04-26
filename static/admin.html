@@ -207,7 +207,7 @@ function showTab(name) {
 
 async function checkWA() {
   try {
-    const r = await fetch(WA+'/status');
+    const r = await fetch(API+'/api/whatsapp/status');
     const d = await r.json();
     const dot = document.getElementById('wa-dot');
     const txt = document.getElementById('wa-status');
