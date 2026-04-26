@@ -633,12 +633,12 @@ def trigger():
 
 @app.route("/api/alertas/test", methods=["GET", "POST"])
 def test_alerta():
-    @app.route("/admin")
-def admin_panel():
-    return app.send_static_file("admin.html")
     threading.Thread(target=chequear_alertas, daemon=True).start()
     return jsonify({"status": "Chequeando alertas en background"})
 
+@app.route("/admin")
+def admin_panel():
+    return app.send_static_file("admin.html")
 # ─── ENDPOINTS USUARIOS ──────────────────────────────────────────────────────
 
 @app.route("/api/usuarios/registro", methods=["POST", "OPTIONS"])
