@@ -6,16 +6,15 @@ app.use(express.json());
 const client = new Client({
     authStrategy: new LocalAuth(),
     puppeteer: {
-    args: [
-        '--no-sandbox',
-        '--disable-setuid-sandbox',
-        '--disable-dev-shm-usage',
-        '--single-process'
-    ],
-    headless: true,
-    executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || '/usr/bin/chromium'
-}
-}
+        args: [
+            '--no-sandbox',
+            '--disable-setuid-sandbox',
+            '--disable-dev-shm-usage',
+            '--single-process'
+        ],
+        headless: true,
+        executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || '/usr/bin/chromium'
+    }
 });
 
 let qrCode = null;
@@ -38,7 +37,6 @@ client.on('disconnected', () => {
     console.log('WhatsApp desconectado');
 });
 
-// Ver QR para escanear
 app.get('/qr', (req, res) => {
     if (isReady) return res.json({ status: 'conectado' });
     if (!qrCode) return res.json({ status: 'esperando_qr' });
@@ -51,17 +49,15 @@ app.get('/qr', (req, res) => {
     `);
 });
 
-// Estado
 app.get('/status', (req, res) => {
     res.json({ ready: isReady });
 });
 
-// Enviar mensaje
 app.post('/send', async (req, res) => {
     const { numero, mensaje } = req.body;
     if (!isReady) return res.status(503).json({ error: 'WhatsApp no conectado' });
     try {
-        const num = numero.startsWith('+') 
+        const num = numero.startsWith('+')
             ? numero.replace('+', '') + '@c.us'
             : '549' + numero + '@c.us';
         await client.sendMessage(num, mensaje);
