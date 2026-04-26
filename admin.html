@@ -1,1 +1,332 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>RodiProp Admin</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #0f0f0f; color: #e5e5e5; min-height: 100vh; }
 
+/* LOGIN */
+#login-screen { display: flex; align-items: center; justify-content: center; min-height: 100vh; }
+.login-card { background: #1a1a1a; border: 1px solid #2a2a2a; border-radius: 12px; padding: 2.5rem; width: 340px; }
+.login-logo { font-size: 22px; font-weight: 600; color: #fff; margin-bottom: 0.25rem; }
+.login-logo span { color: #C9A84C; }
+.login-sub { font-size: 13px; color: #888; margin-bottom: 2rem; }
+.login-label { font-size: 12px; color: #888; margin-bottom: 6px; display: block; }
+.login-input { width: 100%; padding: 10px 12px; background: #0f0f0f; border: 1px solid #2a2a2a; border-radius: 8px; color: #e5e5e5; font-size: 14px; outline: none; }
+.login-input:focus { border-color: #C9A84C; }
+.login-btn { width: 100%; margin-top: 1.25rem; padding: 10px; background: #C9A84C; border: none; border-radius: 8px; color: #0f0f0f; font-size: 14px; font-weight: 600; cursor: pointer; }
+.login-btn:hover { background: #d4b45a; }
+.login-error { font-size: 12px; color: #ef4444; margin-top: 8px; display: none; }
+
+/* PANEL */
+#panel-screen { display: none; padding: 1.5rem 2rem; max-width: 1200px; margin: 0 auto; }
+.header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 1.5rem; padding-bottom: 1rem; border-bottom: 1px solid #2a2a2a; }
+.logo { font-size: 18px; font-weight: 600; color: #fff; }
+.logo span { color: #C9A84C; }
+.header-right { display: flex; gap: 8px; align-items: center; }
+.wa-badge { display: flex; align-items: center; gap: 6px; font-size: 13px; padding: 5px 12px; border-radius: 8px; border: 1px solid #2a2a2a; color: #888; background: #1a1a1a; }
+.wa-dot { width: 8px; height: 8px; border-radius: 50%; background: #555; flex-shrink: 0; }
+.wa-dot.ok { background: #22c55e; }
+.btn { font-size: 13px; padding: 6px 14px; border-radius: 8px; border: 1px solid #2a2a2a; background: #1a1a1a; color: #e5e5e5; cursor: pointer; }
+.btn:hover { background: #252525; border-color: #3a3a3a; }
+.btn-gold { border-color: #C9A84C; color: #C9A84C; }
+.btn-gold:hover { background: rgba(201,168,76,0.1); }
+.section-title { font-size: 11px; font-weight: 600; color: #555; text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 0.75rem; }
+.metric-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin-bottom: 1.5rem; }
+.metric { background: #1a1a1a; border: 1px solid #2a2a2a; border-radius: 10px; padding: 1rem; }
+.metric-label { font-size: 12px; color: #666; margin-bottom: 4px; }
+.metric-value { font-size: 24px; font-weight: 600; color: #fff; }
+.metric-sub { font-size: 11px; color: #555; margin-top: 2px; }
+.actions { display: flex; gap: 8px; margin-bottom: 1.5rem; flex-wrap: wrap; }
+.alert-bar { display: flex; align-items: center; gap: 8px; padding: 10px 14px; border-radius: 8px; background: rgba(234,179,8,0.1); border: 1px solid rgba(234,179,8,0.3); font-size: 13px; color: #fbbf24; margin-bottom: 1rem; }
+.charts-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 1.5rem; }
+.chart-card { background: #1a1a1a; border: 1px solid #2a2a2a; border-radius: 10px; padding: 1rem; }
+.chart-title { font-size: 12px; color: #666; margin-bottom: 0.75rem; font-weight: 500; }
+.tabs { display: flex; gap: 4px; margin-bottom: 1rem; border-bottom: 1px solid #2a2a2a; padding-bottom: 0; }
+.tab { font-size: 13px; padding: 7px 16px; border: none; cursor: pointer; color: #666; background: transparent; border-bottom: 2px solid transparent; margin-bottom: -1px; }
+.tab.active { color: #C9A84C; border-bottom-color: #C9A84C; }
+.tab:hover { color: #e5e5e5; }
+.table-wrap { background: #1a1a1a; border: 1px solid #2a2a2a; border-radius: 10px; overflow: hidden; margin-bottom: 1.5rem; overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; font-size: 13px; min-width: 600px; }
+th { padding: 9px 12px; text-align: left; font-weight: 500; font-size: 11px; color: #555; text-transform: uppercase; letter-spacing: 0.05em; border-bottom: 1px solid #2a2a2a; background: #141414; white-space: nowrap; }
+td { padding: 10px 12px; border-bottom: 1px solid #1f1f1f; color: #ccc; max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+tr:last-child td { border-bottom: none; }
+tr:hover td { background: #1f1f1f; }
+.badge { display: inline-block; font-size: 11px; padding: 2px 8px; border-radius: 6px; font-weight: 500; }
+.badge-gratis { background: #252525; color: #888; }
+.badge-premium { background: rgba(234,179,8,0.15); color: #fbbf24; }
+.badge-inversor { background: rgba(59,130,246,0.15); color: #60a5fa; }
+.badge-approved { background: rgba(34,197,94,0.15); color: #4ade80; }
+.badge-pending { background: rgba(234,179,8,0.15); color: #fbbf24; }
+.badge-rejected, .badge-fail { background: rgba(239,68,68,0.15); color: #f87171; }
+.near-limit td { background: rgba(234,179,8,0.05) !important; }
+.spinner { display: inline-block; width: 14px; height: 14px; border: 2px solid #333; border-top-color: #888; border-radius: 50%; animation: spin 0.8s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.empty { padding: 2rem; text-align: center; color: #444; font-size: 13px; }
+.logout-btn { font-size: 12px; color: #555; background: none; border: none; cursor: pointer; padding: 5px 10px; }
+.logout-btn:hover { color: #888; }
+@media(max-width: 600px) { #panel-screen { padding: 1rem; } .charts-grid { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+
+<div id="login-screen">
+  <div class="login-card">
+    <div class="login-logo">Rodi<span>Prop</span></div>
+    <div class="login-sub">Panel de administración</div>
+    <label class="login-label">Contraseña</label>
+    <input type="password" class="login-input" id="pwd-input" placeholder="••••••••••" onkeydown="if(event.key==='Enter')doLogin()">
+    <div class="login-error" id="login-error">Contraseña incorrecta</div>
+    <button class="login-btn" onclick="doLogin()">Ingresar</button>
+  </div>
+</div>
+
+<div id="panel-screen">
+  <div class="header">
+    <div class="logo">Rodi<span>Prop</span> <span style="font-size:13px;color:#555;font-weight:400;">Admin</span></div>
+    <div class="header-right">
+      <div class="wa-badge"><div class="wa-dot" id="wa-dot"></div><span id="wa-status">Verificando...</span></div>
+      <button class="btn" onclick="loadAll()">↻ Actualizar</button>
+      <button class="logout-btn" onclick="doLogout()">Salir</button>
+    </div>
+  </div>
+
+  <div class="section-title">resumen del sistema</div>
+  <div class="metric-grid" id="metrics">
+    <div class="metric"><div class="metric-label">Propiedades</div><div class="metric-value"><span class="spinner"></span></div></div>
+    <div class="metric"><div class="metric-label">Usuarios activos</div><div class="metric-value"><span class="spinner"></span></div></div>
+    <div class="metric"><div class="metric-label">Planes pagos</div><div class="metric-value"><span class="spinner"></span></div></div>
+    <div class="metric"><div class="metric-label">Ingresos totales</div><div class="metric-value"><span class="spinner"></span></div></div>
+    <div class="metric"><div class="metric-label">Fuentes activas</div><div class="metric-value"><span class="spinner"></span></div></div>
+  </div>
+
+  <div class="actions">
+    <button class="btn btn-gold" onclick="triggerScraper()">▶ Ejecutar scraper</button>
+    <button class="btn" onclick="triggerAlertas()">📨 Test alertas</button>
+    <a href="https://grateful-unity-production-1f47.up.railway.app/qr" target="_blank"><button class="btn">📱 Ver QR WhatsApp</button></a>
+  </div>
+
+  <div id="near-limit-section"></div>
+
+  <div class="charts-grid">
+    <div class="chart-card">
+      <div class="chart-title">propiedades por fuente</div>
+      <div style="position:relative;height:160px;"><canvas id="chartFuentes" role="img" aria-label="Propiedades por fuente"></canvas></div>
+    </div>
+    <div class="chart-card">
+      <div class="chart-title">usuarios por plan</div>
+      <div style="position:relative;height:160px;"><canvas id="chartPlanes" role="img" aria-label="Usuarios por plan"></canvas></div>
+    </div>
+  </div>
+
+  <div class="tabs">
+    <button class="tab active" onclick="showTab('usuarios')">Usuarios</button>
+    <button class="tab" onclick="showTab('pagos')">Pagos</button>
+    <button class="tab" onclick="showTab('props')">Últimas propiedades</button>
+  </div>
+
+  <div id="tab-usuarios">
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Nombre</th><th>Email</th><th>WhatsApp</th><th>Zona</th><th>Plan</th><th>Alertas</th><th>Registro</th></tr></thead>
+        <tbody id="tabla-usuarios"><tr><td colspan="7" class="empty"><span class="spinner"></span></td></tr></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div id="tab-pagos" style="display:none">
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Nombre</th><th>Email</th><th>Plan</th><th>Monto</th><th>Estado</th><th>Fecha</th></tr></thead>
+        <tbody id="tabla-pagos"><tr><td colspan="6" class="empty"><span class="spinner"></span></td></tr></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div id="tab-props" style="display:none">
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Título</th><th>Precio</th><th>Moneda</th><th>Ubicación</th><th>Fuente</th><th>Operación</th></tr></thead>
+        <tbody id="tabla-props"><tr><td colspan="6" class="empty"><span class="spinner"></span></td></tr></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
+<script>
+const API = 'https://web-production-88fd4.up.railway.app';
+const WA  = 'https://grateful-unity-production-1f47.up.railway.app';
+let chartFuentes, chartPlanes;
+const ADMIN_PWD_KEY = 'rodiprop_admin_auth';
+
+function doLogin() {
+  const pwd = document.getElementById('pwd-input').value;
+  fetch(API + '/api/admin/auth', {
+    method: 'POST',
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({password: pwd})
+  }).then(r => r.json()).then(d => {
+    if(d.ok) {
+      sessionStorage.setItem(ADMIN_PWD_KEY, pwd);
+      document.getElementById('login-screen').style.display = 'none';
+      document.getElementById('panel-screen').style.display = 'block';
+      loadAll();
+    } else {
+      document.getElementById('login-error').style.display = 'block';
+    }
+  }).catch(() => {
+    document.getElementById('login-error').style.display = 'block';
+  });
+}
+
+function doLogout() {
+  sessionStorage.removeItem(ADMIN_PWD_KEY);
+  document.getElementById('login-screen').style.display = 'flex';
+  document.getElementById('panel-screen').style.display = 'none';
+  document.getElementById('pwd-input').value = '';
+}
+
+if(sessionStorage.getItem(ADMIN_PWD_KEY)) {
+  document.getElementById('login-screen').style.display = 'none';
+  document.getElementById('panel-screen').style.display = 'block';
+  setTimeout(loadAll, 100);
+}
+
+function showTab(name) {
+  ['usuarios','pagos','props'].forEach(t => {
+    document.getElementById('tab-'+t).style.display = t===name?'':'none';
+  });
+  document.querySelectorAll('.tab').forEach((el,i) => {
+    el.className = 'tab' + (['usuarios','pagos','props'][i]===name?' active':'');
+  });
+}
+
+async function checkWA() {
+  try {
+    const r = await fetch(WA+'/status');
+    const d = await r.json();
+    const dot = document.getElementById('wa-dot');
+    const txt = document.getElementById('wa-status');
+    if(d.ready){ dot.className='wa-dot ok'; txt.textContent='WhatsApp conectado'; }
+    else { dot.className='wa-dot'; txt.textContent='WhatsApp desconectado'; }
+  } catch(e) { document.getElementById('wa-status').textContent='Sin conexión'; }
+}
+
+async function loadMetrics() {
+  try {
+    const [s, u, p] = await Promise.all([
+      fetch(API+'/api/stats').then(r=>r.json()),
+      fetch(API+'/api/usuarios/stats').then(r=>r.json()),
+      fetch(API+'/api/pagos/lista').then(r=>r.json())
+    ]);
+    const aprobados = (p.pagos||[]).filter(x=>x.estado==='approved');
+    const ingresos = aprobados.reduce((a,x)=>a+(x.monto||0),0);
+    const pagosCount = Object.entries(u.por_plan||{}).filter(([k])=>k!=='gratis').reduce((a,[,v])=>a+v,0);
+    document.getElementById('metrics').innerHTML = `
+      <div class="metric"><div class="metric-label">Propiedades</div><div class="metric-value">${(s.total||0).toLocaleString()}</div></div>
+      <div class="metric"><div class="metric-label">Usuarios activos</div><div class="metric-value">${u.total_usuarios||0}</div></div>
+      <div class="metric"><div class="metric-label">Planes pagos</div><div class="metric-value">${pagosCount}</div></div>
+      <div class="metric"><div class="metric-label">Ingresos totales</div><div class="metric-value">$${Math.round(ingresos).toLocaleString()}</div><div class="metric-sub">ARS</div></div>
+      <div class="metric"><div class="metric-label">Fuentes activas</div><div class="metric-value">${Object.keys(s.por_fuente||{}).length}</div></div>`;
+    renderChartFuentes(s.por_fuente||{});
+    renderChartPlanes(u.por_plan||{});
+  } catch(e) {}
+}
+
+async function loadUsuarios() {
+  try {
+    const d = await fetch(API+'/api/usuarios/lista').then(r=>r.json());
+    const usuarios = d.usuarios||[];
+    const tb = document.getElementById('tabla-usuarios');
+    if(!usuarios.length){tb.innerHTML='<tr><td colspan="7" class="empty">Sin usuarios aún</td></tr>';return;}
+    const nearLimit = usuarios.filter(u=>u.plan==='gratis'&&(u.alertas_enviadas_count||0)>=5);
+    if(nearLimit.length) {
+      document.getElementById('near-limit-section').innerHTML=`<div class="alert-bar">⚠ ${nearLimit.length} usuario(s) con 5+ alertas gratuitas — candidatos a convertir a Premium</div>`;
+    }
+    tb.innerHTML = usuarios.map(u => {
+      const a = u.alertas_enviadas_count||0;
+      const near = u.plan==='gratis'&&a>=5;
+      return `<tr class="${near?'near-limit':''}">
+        <td>${u.nombre||'-'}</td><td>${u.email||'-'}</td><td>${u.whatsapp||'-'}</td>
+        <td>${u.zona||'-'}</td>
+        <td><span class="badge badge-${u.plan||'gratis'}">${u.plan||'gratis'}</span></td>
+        <td>${a}${near?' ⚠':''}</td>
+        <td>${u.fecha?u.fecha.substring(0,10):'-'}</td>
+      </tr>`;
+    }).join('');
+  } catch(e) { document.getElementById('tabla-usuarios').innerHTML='<tr><td colspan="7" class="empty">Error</td></tr>'; }
+}
+
+async function loadPagos() {
+  try {
+    const d = await fetch(API+'/api/pagos/lista').then(r=>r.json());
+    const pagos = d.pagos||[];
+    const tb = document.getElementById('tabla-pagos');
+    if(!pagos.length){tb.innerHTML='<tr><td colspan="6" class="empty">Sin pagos aún</td></tr>';return;}
+    tb.innerHTML = pagos.map(p=>`<tr>
+      <td>${p.nombre||'-'}</td><td>${p.email||'-'}</td>
+      <td><span class="badge badge-${p.plan==='inversor'?'inversor':'premium'}">${p.plan||'-'}</span></td>
+      <td>$${Math.round(p.monto||0).toLocaleString()}</td>
+      <td><span class="badge badge-${p.estado||'pending'}">${p.estado||'-'}</span></td>
+      <td>${p.fecha?p.fecha.substring(0,16).replace('T',' '):'-'}</td>
+    </tr>`).join('');
+  } catch(e) { document.getElementById('tabla-pagos').innerHTML='<tr><td colspan="6" class="empty">Error</td></tr>'; }
+}
+
+async function loadProps() {
+  try {
+    const d = await fetch(API+'/api/propiedades?limit=20').then(r=>r.json());
+    const props = d.propiedades||[];
+    const tb = document.getElementById('tabla-props');
+    if(!props.length){tb.innerHTML='<tr><td colspan="6" class="empty">Sin propiedades</td></tr>';return;}
+    tb.innerHTML = props.map(p=>`<tr>
+      <td><a href="${p.url}" target="_blank" style="color:#C9A84C;text-decoration:none;">${(p.titulo||'-').substring(0,45)}</a></td>
+      <td>${p.precio?Number(p.precio).toLocaleString():'-'}</td>
+      <td>${p.moneda||'USD'}</td>
+      <td>${(p.ubicacion||'-').substring(0,25)}</td>
+      <td>${p.fuente||'-'}</td>
+      <td>${p.operacion||'-'}</td>
+    </tr>`).join('');
+  } catch(e) {}
+}
+
+function renderChartFuentes(data) {
+  const labels = Object.keys(data);
+  const values = Object.values(data);
+  const colors = ['#378ADD','#1D9E75','#D85A30','#D4537E','#888780'];
+  if(chartFuentes) chartFuentes.destroy();
+  chartFuentes = new Chart(document.getElementById('chartFuentes'),{
+    type:'doughnut',
+    data:{labels,datasets:[{data:values,backgroundColor:colors.slice(0,labels.length),borderWidth:0}]},
+    options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'right',labels:{color:'#888',font:{size:11},boxWidth:10,padding:8}}}}
+  });
+}
+
+function renderChartPlanes(data) {
+  const labels = Object.keys(data);
+  const values = Object.values(data);
+  const colors = {gratis:'#444',premium:'#C9A84C',inversor:'#378ADD'};
+  if(chartPlanes) chartPlanes.destroy();
+  chartPlanes = new Chart(document.getElementById('chartPlanes'),{
+    type:'bar',
+    data:{labels,datasets:[{data:values,backgroundColor:labels.map(l=>colors[l]||'#444'),borderWidth:0,borderRadius:4}]},
+    options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{x:{grid:{display:false},ticks:{color:'#666',font:{size:11}}},y:{grid:{color:'rgba(255,255,255,0.05)'},ticks:{color:'#666',font:{size:11},stepSize:1}}}}
+  });
+}
+
+async function triggerScraper() {
+  try { await fetch(API+'/api/scraper/ejecutar',{method:'POST'}); alert('Scraper iniciado!'); } catch(e){}
+}
+async function triggerAlertas() {
+  try { await fetch(API+'/api/alertas/test',{method:'POST'}); alert('Chequeando alertas...'); } catch(e){}
+}
+
+async function loadAll() { checkWA(); loadMetrics(); loadUsuarios(); loadPagos(); loadProps(); }
+setInterval(checkWA, 30000);
+</script>
+</body>
+</html>
