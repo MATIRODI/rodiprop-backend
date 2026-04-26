@@ -914,14 +914,6 @@ def fix_moneda():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-# ─── INIT ─────────────────────────────────────────────────────────────────────
-
-try:
-    init_db()
-except Exception as e:
-    print("DB init error: " + str(e))
-
-threading.Thread(target=auto_scraper, daemon=True).start()
 @app.route("/api/admin/auth", methods=["POST", "OPTIONS"])
 def admin_auth():
     if request.method == "OPTIONS":
@@ -932,8 +924,6 @@ def admin_auth():
     if pwd == admin_pwd:
         return jsonify({"ok": True})
     return jsonify({"ok": False}), 401
-if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
 
 @app.route("/api/whatsapp/status")
 def wa_status():
@@ -942,3 +932,16 @@ def wa_status():
         return jsonify(r.json())
     except:
         return jsonify({"ready": False})
+
+# ─── INIT ─────────────────────────────────────────────────────────────────────
+
+try:
+    init_db()
+except Exception as e:
+    print("DB init error: " + str(e))
+
+threading.Thread(target=auto_scraper, daemon=True).start()
+
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
+       
