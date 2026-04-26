@@ -934,3 +934,11 @@ def admin_auth():
     return jsonify({"ok": False}), 401
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
+
+@app.route("/api/whatsapp/status")
+def wa_status():
+    try:
+        r = requests.get("https://grateful-unity-production-1f47.up.railway.app/status", timeout=5)
+        return jsonify(r.json())
+    except:
+        return jsonify({"ready": False})
