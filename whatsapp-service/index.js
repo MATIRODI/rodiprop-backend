@@ -1,7 +1,39 @@
 const { Client, LocalAuth } = require('whatsapp-web.js');
 const express = require('express');
+const fs = require('fs');
+const path = require('path');
 const app = express();
 app.use(express.json());
+
+// Eliminar lock files de Chromium antes de iniciar para evitar el error
+// "profile appears to be in use" cuando el contenedor crashea y se reinicia
+function cleanChromiumLocks() {
+    const searchDirs = ['./.wwebjs_auth', './.wwebjs_cache'];
+    const lockFiles = ['SingletonLock', 'SingletonCookie', 'SingletonSocket'];
+    searchDirs.forEach(dir => {
+        if (!fs.existsSync(dir)) return;
+        try {
+            const walk = (d) => {
+                fs.readdirSync(d).forEach(entry => {
+                    const full = path.join(d, entry);
+                    try {
+                        if (fs.statSync(full).isDirectory()) {
+                            walk(full);
+                        } else if (lockFiles.includes(entry)) {
+                            fs.unlinkSync(full);
+                            console.log('Lock eliminado: ' + full);
+                        }
+                    } catch(e) {}
+                });
+            };
+            walk(dir);
+        } catch(e) {
+            console.log('Lock cleanup error: ' + e.message);
+        }
+    });
+}
+
+cleanChromiumLocks();
 
 const client = new Client({
     authStrategy: new LocalAuth(),
@@ -10,6 +42,10 @@ const client = new Client({
             '--no-sandbox',
             '--disable-setuid-sandbox',
             '--disable-dev-shm-usage',
+            '--disable-gpu',
+            '--no-first-run',
+            '--no-default-browser-check',
+            '--disable-extensions',
             '--single-process'
         ],
         headless: true,
