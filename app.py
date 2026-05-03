@@ -1,5 +1,6 @@
 from flask import Flask, jsonify, request, redirect
 from flask_cors import CORS
+from functools import wraps
 import os, threading, time, requests, random, json, re, urllib.request, urllib.parse, base64
 from bs4 import BeautifulSoup
 from datetime import datetime
@@ -63,6 +64,20 @@ def get_conn():
     import pg8000.dbapi as pg
     print("Connecting to " + PG_HOST + ":" + str(PG_PORT) + " db=" + PG_DB)
     return pg.connect(user=PG_USER, password=PG_PASS, host=PG_HOST, port=PG_PORT, database=PG_DB)
+
+# ─── AUTH ────────────────────────────────────────────────────────────────────
+
+def require_admin(f):
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        key = (request.headers.get("X-Admin-Key") or
+               request.args.get("key", "") or
+               (request.get_json(silent=True) or {}).get("key", ""))
+        admin_pwd = os.environ.get("ADMIN_PASSWORD", "")
+        if not admin_pwd or key != admin_pwd:
+            return jsonify({"error": "No autorizado"}), 401
+        return f(*args, **kwargs)
+    return decorated
 
 # ─── DB INIT ────────────────────────────────────────────────────────────────
 
@@ -239,8 +254,10 @@ def registrar_pago_db(usuario_id, plan, mp_payment_id, monto, estado, tipo="chec
             (usuario_id, plan, str(mp_payment_id), monto, estado, tipo)
         )
         if estado == "approved":
+            from datetime import timedelta
             cur.execute(
-                "UPDATE usuarios SET plan=%s, activo=TRUE WHERE id=%s",
+                "UPDATE usuarios SET plan=%s, activo=TRUE,"
+                " plan_vence=NOW() + INTERVAL '31 days' WHERE id=%s",
                 (plan, usuario_id)
             )
         conn.commit()
@@ -321,7 +338,6 @@ def scrape_ap(paginas=20):
     except Exception:
         pass
 
-    # Localidades específicas de Córdoba para AP (slug format)
     AP_LOCALIDADES = [
         ("cordoba", "cordoba-capital"),
         ("villa-allende", "villa-allende"),
@@ -366,7 +382,6 @@ def scrape_ap(paginas=20):
                 pass
         return resultado
 
-    # Scraping por localidad específica
     for op in ["venta", "alquiler"]:
         for loc_nombre, loc_slug in AP_LOCALIDADES:
             for i in range(1, paginas + 1):
@@ -380,18 +395,17 @@ def scrape_ap(paginas=20):
                     soup = BeautifulSoup(r.text, "html.parser")
                     cards = soup.select(".listing__item") or soup.select("article.card")
                     if not cards:
-                        break  # No hay más páginas para esta localidad
+                        break
                     nuevas = parsear_cards(cards, op)
                     props.extend(nuevas)
                     print("AP " + op + "/" + loc_nombre + " p" + str(i) + ": " + str(len(nuevas)))
                     if len(cards) < 10:
-                        break  # Última página parcial
+                        break
                     time.sleep(random.uniform(1.5, 2.5))
                 except Exception as e:
                     print("AP " + loc_nombre + " error: " + str(e))
                     break
 
-    # También scraping general de provincia (para capturar lo que no está en localidades)
     for op in ["venta", "alquiler"]:
         for i in range(1, 30):
             try:
@@ -465,6 +479,225 @@ def scrape_lavoz(paginas=15):
                 print("LaVoz error: " + str(e))
     return props
 
+def scrape_zonaprop(paginas=10):
+    props = []
+    s = requests.Session()
+    try:
+        s.get("https://www.zonaprop.com.ar", headers=get_headers(), timeout=10)
+    except Exception:
+        pass
+    for op, slug in [("venta", "venta"), ("alquiler", "alquiler")]:
+        for i in range(1, paginas + 1):
+            try:
+                if i == 1:
+                    url = "https://www.zonaprop.com.ar/inmuebles-" + slug + "-cordoba.html"
+                else:
+                    url = ("https://www.zonaprop.com.ar/inmuebles-" + slug
+                           + "-cordoba-pagina-" + str(i) + ".html")
+                r = s.get(url, headers=get_headers(), timeout=20)
+                if r.status_code in [403, 429]:
+                    time.sleep(random.uniform(10, 20))
+                    break
+                soup = BeautifulSoup(r.text, "html.parser")
+                nuevas = []
+
+                # Intentar extraer datos del script __NEXT_DATA__ (Next.js)
+                next_data = soup.find("script", id="__NEXT_DATA__")
+                if next_data and next_data.string:
+                    try:
+                        data = json.loads(next_data.string)
+                        page_props = data.get("props", {}).get("pageProps", {})
+                        listings = (
+                            page_props.get("listings") or
+                            page_props.get("listPostings") or
+                            page_props.get("results") or
+                            []
+                        )
+                        for item in listings:
+                            try:
+                                titulo = (item.get("title") or
+                                          item.get("propertyType", {}).get("name", "") or "Propiedad")
+                                precio_raw = item.get("price") or item.get("priceFormatted") or ""
+                                precio = re.sub(r'[^0-9]', '', str(precio_raw))
+                                moneda = item.get("currency", "USD")
+                                ubicacion = (
+                                    item.get("address") or
+                                    str((item.get("location") or {}).get("name", "")) or
+                                    "Córdoba"
+                                )
+                                prop_id = item.get("id") or item.get("postingId") or ""
+                                url_prop = ("https://www.zonaprop.com.ar" + item.get("url", "")
+                                            if item.get("url", "").startswith("/")
+                                            else item.get("url", ""))
+                                fotos = item.get("photos") or item.get("images") or []
+                                imagen = ""
+                                if fotos:
+                                    primera = fotos[0]
+                                    imagen = (primera if isinstance(primera, str)
+                                              else primera.get("url", primera.get("src", "")))
+                                atributos = []
+                                for attr in (item.get("attributes") or item.get("features") or []):
+                                    if isinstance(attr, dict):
+                                        atributos.append(attr.get("label", "") + ": " + str(attr.get("value", "")))
+                                    elif isinstance(attr, str):
+                                        atributos.append(attr)
+                                if titulo or precio:
+                                    nuevas.append({
+                                        "titulo": titulo, "precio": precio, "moneda": moneda,
+                                        "ubicacion": ubicacion, "url": url_prop, "imagen": imagen,
+                                        "fuente": "ZonaProp", "operacion": op, "atributos": atributos,
+                                    })
+                            except Exception:
+                                pass
+                    except Exception as e:
+                        print("ZP JSON parse: " + str(e))
+
+                # Fallback HTML si no se extrajo nada del JSON
+                if not nuevas:
+                    cards = soup.select("[data-id]")
+                    for card in cards:
+                        try:
+                            t_el  = card.select_one(".postingCardTitle")
+                            p_el  = card.select_one("[data-price]")
+                            u_el  = (card.select_one(".postingCardLocation") or
+                                     card.select_one("[class*='location']"))
+                            l_el  = (card.select_one("a[href*='/propiedades/']") or
+                                     card.select_one("a[href]"))
+                            img   = card.select_one("img")
+                            attrs = card.select(".postingCardAttribute")
+                            titulo = t_el.text.strip() if t_el else ""
+                            precio = ""
+                            if p_el:
+                                precio = re.sub(r'[^0-9]', '', p_el.get("data-price", "") or p_el.text)
+                            ubicacion = u_el.text.strip() if u_el else "Córdoba"
+                            href = l_el["href"] if l_el else ""
+                            url_prop = ("https://www.zonaprop.com.ar" + href
+                                        if href and not href.startswith("http") else href)
+                            imagen = (img.get("data-src") or img.get("src", "")) if img else ""
+                            if titulo or precio:
+                                nuevas.append({
+                                    "titulo": titulo, "precio": precio, "moneda": "USD",
+                                    "ubicacion": ubicacion, "url": url_prop, "imagen": imagen,
+                                    "fuente": "ZonaProp", "operacion": op,
+                                    "atributos": [a.text.strip() for a in attrs],
+                                })
+                        except Exception:
+                            pass
+
+                props.extend(nuevas)
+                print("ZP " + op + " p" + str(i) + ": " + str(len(nuevas)))
+                if not nuevas:
+                    break
+                time.sleep(random.uniform(2, 3))
+            except Exception as e:
+                print("ZP error: " + str(e))
+                break
+    return props
+
+def scrape_remax(paginas=10):
+    props = []
+    s = requests.Session()
+    try:
+        s.get("https://www.remax.com.ar", headers=get_headers(), timeout=10)
+    except Exception:
+        pass
+
+    for op, slug in [("venta", "comprar"), ("alquiler", "alquilar")]:
+        for i in range(1, paginas + 1):
+            try:
+                url = ("https://www.remax.com.ar/" + slug +
+                       "/propiedades/cordoba--provincia" +
+                       ("" if i == 1 else "?page=" + str(i)))
+                r = s.get(url, headers=get_headers(), timeout=20)
+                if r.status_code in [403, 429]:
+                    time.sleep(random.uniform(10, 20))
+                    break
+                soup = BeautifulSoup(r.text, "html.parser")
+                nuevas = []
+
+                # Intentar extraer datos del script __NEXT_DATA__ (Next.js)
+                next_data = soup.find("script", id="__NEXT_DATA__")
+                if next_data and next_data.string:
+                    try:
+                        data = json.loads(next_data.string)
+                        page_props = data.get("props", {}).get("pageProps", {})
+                        listings = (
+                            page_props.get("listings") or
+                            page_props.get("results") or
+                            (page_props.get("initialState") or {}).get("listings", {}).get("data", []) or
+                            []
+                        )
+                        for item in listings:
+                            try:
+                                tipo = (item.get("propertyType") or {}).get("name", "")
+                                titulo = item.get("title") or tipo or "Propiedad"
+                                precio = re.sub(r'[^0-9]', '', str(item.get("price") or ""))
+                                moneda = item.get("currency", "USD")
+                                ubicacion = (
+                                    item.get("address") or
+                                    str((item.get("location") or {}).get("name", "")) or
+                                    "Córdoba"
+                                )
+                                prop_id = item.get("id") or item.get("listingId") or ""
+                                url_prop = ("https://www.remax.com.ar/listing/" + str(prop_id)
+                                            if prop_id else "")
+                                fotos = item.get("photos") or item.get("images") or []
+                                imagen = ""
+                                if fotos:
+                                    primera = fotos[0]
+                                    imagen = (primera if isinstance(primera, str)
+                                              else primera.get("url", primera.get("src", "")))
+                                if titulo or precio:
+                                    nuevas.append({
+                                        "titulo": titulo, "precio": precio, "moneda": moneda,
+                                        "ubicacion": ubicacion, "url": url_prop, "imagen": imagen,
+                                        "fuente": "Remax", "operacion": op, "atributos": [],
+                                    })
+                            except Exception:
+                                pass
+                    except Exception as e:
+                        print("RM JSON parse: " + str(e))
+
+                # Fallback HTML
+                if not nuevas:
+                    cards = (soup.select(".listing-card") or
+                             soup.select("[class*='ListingCard']") or
+                             soup.select("article[class*='card']") or
+                             soup.select("[class*='property-card']") or
+                             soup.select("article"))
+                    for card in cards:
+                        try:
+                            t_el  = card.select_one("h2,h3,[class*='title']")
+                            p_el  = card.select_one("[class*='price']")
+                            u_el  = card.select_one("[class*='address'],[class*='location']")
+                            l_el  = card.select_one("a[href]")
+                            img   = card.select_one("img")
+                            titulo = t_el.text.strip() if t_el else ""
+                            precio = re.sub(r'[^0-9]', '', p_el.text.strip()) if p_el else ""
+                            ubicacion = u_el.text.strip() if u_el else "Córdoba"
+                            href = l_el["href"] if l_el else ""
+                            url_prop = (href if href.startswith("http")
+                                        else "https://www.remax.com.ar" + href)
+                            imagen = (img.get("data-src") or img.get("src", "")) if img else ""
+                            if titulo or precio:
+                                nuevas.append({
+                                    "titulo": titulo, "precio": precio, "moneda": "USD",
+                                    "ubicacion": ubicacion, "url": url_prop, "imagen": imagen,
+                                    "fuente": "Remax", "operacion": op, "atributos": [],
+                                })
+                        except Exception:
+                            pass
+
+                props.extend(nuevas)
+                print("RM " + op + " p" + str(i) + ": " + str(len(nuevas)))
+                if not nuevas:
+                    break
+                time.sleep(random.uniform(2, 3))
+            except Exception as e:
+                print("RM error: " + str(e))
+                break
+    return props
+
 # ─── ALERTAS ─────────────────────────────────────────────────────────────────
 
 def chequear_alertas():
@@ -474,17 +707,31 @@ def chequear_alertas():
         cur.execute(
             "SELECT id,nombre,email,whatsapp,zona,tipo,operacion,"
             "precio_min,precio_max,ambientes,cocheras,plan,"
-            "COALESCE(alertas_enviadas_count,0) as alertas_count"
+            "COALESCE(alertas_enviadas_count,0) as alertas_count,"
+            "plan_vence"
             " FROM usuarios WHERE activo=TRUE AND whatsapp != ''"
             " AND (plan='premium' OR plan='inversor' OR COALESCE(alertas_enviadas_count,0) < 7)"
         )
         cols = ["id", "nombre", "email", "whatsapp", "zona", "tipo", "operacion",
-                "precio_min", "precio_max", "ambientes", "cocheras", "plan", "alertas_count"]
+                "precio_min", "precio_max", "ambientes", "cocheras", "plan", "alertas_count",
+                "plan_vence"]
         usuarios = [dict(zip(cols, row)) for row in cur.fetchall()]
         cur.close()
         conn.close()
         for u in usuarios:
             try:
+                # Verificar vencimiento del plan
+                plan_actual = u["plan"]
+                if plan_actual in ("premium", "inversor") and u.get("plan_vence"):
+                    try:
+                        vence = u["plan_vence"]
+                        vence_dt = vence if isinstance(vence, datetime) else datetime.fromisoformat(str(vence))
+                        if vence_dt < datetime.now():
+                            plan_actual = "gratis"
+                    except Exception:
+                        pass
+                u["plan"] = plan_actual
+
                 conn2 = get_conn()
                 cur2 = conn2.cursor()
                 query = ("SELECT titulo,precio,moneda,ubicacion,url,fuente FROM propiedades"
@@ -499,15 +746,23 @@ def chequear_alertas():
                 if u.get("operacion"):
                     query += " AND LOWER(operacion) = %s"
                     params.append(u["operacion"].lower())
-                if u.get("precio_min") and int(u["precio_min"]) > 0:
-                    query += " AND CAST(NULLIF(precio, '') AS BIGINT) >= %s"
-                    params.append(int(u["precio_min"]))
-                if u.get("precio_max") and int(u["precio_max"]) < 999999999:
-                    query += " AND CAST(NULLIF(precio, '') AS BIGINT) <= %s"
-                    params.append(int(u["precio_max"]))
+                # Filtro de precio con pre-validación numérica para evitar errores de CAST
+                precio_min = int(u["precio_min"]) if u.get("precio_min") else 0
+                precio_max = int(u["precio_max"]) if u.get("precio_max") else 999999999
+                if precio_min > 0 or precio_max < 999999999:
+                    query += " AND precio ~ '^[0-9]+$'"
+                if precio_min > 0:
+                    query += " AND CAST(precio AS BIGINT) >= %s"
+                    params.append(precio_min)
+                if precio_max < 999999999:
+                    query += " AND CAST(precio AS BIGINT) <= %s"
+                    params.append(precio_max)
                 if u.get("ambientes"):
                     query += " AND (LOWER(titulo) LIKE %s OR LOWER(titulo) LIKE %s)"
                     params += ["%" + u["ambientes"] + " amb%", "%" + u["ambientes"] + " dorm%"]
+                if u.get("cocheras") and str(u["cocheras"]).strip():
+                    query += " AND (LOWER(titulo) LIKE %s OR LOWER(atributos) LIKE %s)"
+                    params += ["%cochera%", "%cochera%"]
                 query += " AND url NOT IN (SELECT propiedad_url FROM alertas_enviadas WHERE usuario_id=%s) LIMIT 3"
                 params.append(u["id"])
                 cur2.execute(query, params)
@@ -517,7 +772,6 @@ def chequear_alertas():
                 for prop in props_encontradas:
                     titulo, precio, moneda, ubicacion, url, fuente = prop
 
-                    # Paywall: si ya llegó a 7 y es plan gratis, mandar mensaje de límite y parar
                     if u["plan"] == "gratis" and alertas_count_actual >= 7:
                         link_premium = FRONTEND_URL + "/premium?email=" + u.get("email", "")
                         msg_limite = (
@@ -528,12 +782,11 @@ def chequear_alertas():
                             "_Las mejores propiedades duran menos de 24hs — no te las pierdas._"
                         )
                         enviar_whatsapp(u["whatsapp"], msg_limite)
-                        break  # No enviar más alertas a este usuario
+                        break
 
                     precio_str = (moneda + " " + "{:,}".format(int(precio))
                                   if precio and precio.isdigit() else precio or "Consultar")
 
-                    # Mensaje normal de alerta
                     es_ultima = (u["plan"] == "gratis" and alertas_count_actual == 6)
                     aviso_limite = (
                         "\n\n⚠️ _Esta es tu última alerta gratuita. Upgrade a Premium:_\n"
@@ -576,9 +829,11 @@ def run_scraper():
     print("Scraper iniciando...")
     todas = []
     for fn, name, kwargs in [
-        (scrape_ml,    "ML",    {"paginas": 5}),
-        (scrape_ap,    "AP",    {}),
-        (scrape_lavoz, "LaVoz", {"paginas": 15}),
+        (scrape_ml,       "ML",       {"paginas": 5}),
+        (scrape_ap,       "AP",       {}),
+        (scrape_lavoz,    "LaVoz",    {"paginas": 15}),
+        (scrape_zonaprop, "ZonaProp", {"paginas": 10}),
+        (scrape_remax,    "Remax",    {"paginas": 10}),
     ]:
         try:
             r = fn(**kwargs)
@@ -605,7 +860,7 @@ def auto_scraper():
 def home():
     return jsonify({
         "status": "RodiProp API OK",
-        "version": "8.0",
+        "version": "9.0",
         "pg_host": PG_HOST,
         "total": contar_props(),
         "mp": "activo" if MP_ACCESS_TOKEN else "pendiente-credenciales",
@@ -627,11 +882,13 @@ def stats():
     return jsonify(stats_db())
 
 @app.route("/api/scraper/ejecutar", methods=["GET", "POST"])
+@require_admin
 def trigger():
     threading.Thread(target=run_scraper, daemon=True).start()
     return jsonify({"status": "Scraper iniciado"})
 
 @app.route("/api/alertas/test", methods=["GET", "POST"])
+@require_admin
 def test_alerta():
     threading.Thread(target=chequear_alertas, daemon=True).start()
     return jsonify({"status": "Chequeando alertas en background"})
@@ -639,6 +896,7 @@ def test_alerta():
 @app.route("/admin")
 def admin_panel():
     return app.send_static_file("admin.html")
+
 # ─── ENDPOINTS USUARIOS ──────────────────────────────────────────────────────
 
 @app.route("/api/usuarios/registro", methods=["POST", "OPTIONS"])
@@ -674,6 +932,7 @@ def registro():
         return jsonify({"error": str(e)}), 500
 
 @app.route("/api/usuarios/lista")
+@require_admin
 def lista_usuarios():
     try:
         conn = get_conn()
@@ -695,6 +954,7 @@ def lista_usuarios():
         return jsonify({"error": str(e)}), 500
 
 @app.route("/api/usuarios/stats")
+@require_admin
 def usuarios_stats():
     try:
         conn = get_conn()
@@ -720,7 +980,7 @@ def crear_pago():
         return jsonify({"error": "Datos requeridos"}), 400
     email    = data.get("email", "").strip().lower()
     plan_key = data.get("plan", "premium").strip().lower()
-    tipo     = data.get("tipo", "checkout")  # "checkout" o "suscripcion"
+    tipo     = data.get("tipo", "checkout")
     if not email:
         return jsonify({"error": "Email requerido"}), 400
     if plan_key not in PLANES:
@@ -876,6 +1136,7 @@ def webhook_mp():
     return jsonify({"status": "ok"}), 200
 
 @app.route("/api/pagos/lista")
+@require_admin
 def lista_pagos():
     try:
         conn = get_conn()
@@ -901,6 +1162,7 @@ def lista_pagos():
 # ─── OTROS ───────────────────────────────────────────────────────────────────
 
 @app.route("/api/db/fix-moneda", methods=["GET", "POST"])
+@require_admin
 def fix_moneda():
     try:
         conn = get_conn()
@@ -928,9 +1190,9 @@ def admin_auth():
 @app.route("/api/whatsapp/status")
 def wa_status():
     try:
-        r = requests.get("https://grateful-unity-production-1f47.up.railway.app/status", timeout=5)
+        r = requests.get(WA_SERVICE_URL + "/status", timeout=5)
         return jsonify(r.json())
-    except:
+    except Exception:
         return jsonify({"ready": False})
 
 # ─── INIT ─────────────────────────────────────────────────────────────────────
@@ -944,4 +1206,3 @@ threading.Thread(target=auto_scraper, daemon=True).start()
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
-       

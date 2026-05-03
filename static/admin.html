@@ -163,6 +163,14 @@ const WA  = 'https://grateful-unity-production-1f47.up.railway.app';
 let chartFuentes, chartPlanes;
 const ADMIN_PWD_KEY = 'rodiprop_admin_auth';
 
+function authFetch(url, opts) {
+  opts = opts || {};
+  const key = sessionStorage.getItem(ADMIN_PWD_KEY) || '';
+  return fetch(url, Object.assign({}, opts, {
+    headers: Object.assign({'X-Admin-Key': key, 'Content-Type': 'application/json'}, opts.headers || {})
+  }));
+}
+
 function doLogin() {
   const pwd = document.getElementById('pwd-input').value;
   fetch(API + '/api/admin/auth', {
@@ -220,8 +228,8 @@ async function loadMetrics() {
   try {
     const [s, u, p] = await Promise.all([
       fetch(API+'/api/stats').then(r=>r.json()),
-      fetch(API+'/api/usuarios/stats').then(r=>r.json()),
-      fetch(API+'/api/pagos/lista').then(r=>r.json())
+      authFetch(API+'/api/usuarios/stats').then(r=>r.json()),
+      authFetch(API+'/api/pagos/lista').then(r=>r.json())
     ]);
     const aprobados = (p.pagos||[]).filter(x=>x.estado==='approved');
     const ingresos = aprobados.reduce((a,x)=>a+(x.monto||0),0);
@@ -239,7 +247,7 @@ async function loadMetrics() {
 
 async function loadUsuarios() {
   try {
-    const d = await fetch(API+'/api/usuarios/lista').then(r=>r.json());
+    const d = await authFetch(API+'/api/usuarios/lista').then(r=>r.json());
     const usuarios = d.usuarios||[];
     const tb = document.getElementById('tabla-usuarios');
     if(!usuarios.length){tb.innerHTML='<tr><td colspan="7" class="empty">Sin usuarios aún</td></tr>';return;}
@@ -263,7 +271,7 @@ async function loadUsuarios() {
 
 async function loadPagos() {
   try {
-    const d = await fetch(API+'/api/pagos/lista').then(r=>r.json());
+    const d = await authFetch(API+'/api/pagos/lista').then(r=>r.json());
     const pagos = d.pagos||[];
     const tb = document.getElementById('tabla-pagos');
     if(!pagos.length){tb.innerHTML='<tr><td colspan="6" class="empty">Sin pagos aún</td></tr>';return;}
@@ -319,10 +327,10 @@ function renderChartPlanes(data) {
 }
 
 async function triggerScraper() {
-  try { await fetch(API+'/api/scraper/ejecutar',{method:'POST'}); alert('Scraper iniciado!'); } catch(e){}
+  try { await authFetch(API+'/api/scraper/ejecutar',{method:'POST'}); alert('Scraper iniciado!'); } catch(e){}
 }
 async function triggerAlertas() {
-  try { await fetch(API+'/api/alertas/test',{method:'POST'}); alert('Chequeando alertas...'); } catch(e){}
+  try { await authFetch(API+'/api/alertas/test',{method:'POST'}); alert('Chequeando alertas...'); } catch(e){}
 }
 
 async function loadAll() { checkWA(); loadMetrics(); loadUsuarios(); loadPagos(); loadProps(); }

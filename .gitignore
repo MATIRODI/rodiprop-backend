@@ -1,0 +1,37 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+.eggs/
+venv/
+env/
+.venv/
+
+# Env / secrets
+.env
+.env.*
+*.local
+
+# Logs
+*.log
+
+# WhatsApp session (Puppeteer / whatsapp-web.js)
+whatsapp-service/.wwebjs_auth/
+whatsapp-service/.wwebjs_cache/
+whatsapp-service/node_modules/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+
+# Datos locales de scraping
+propiedades.json

@@ -57,10 +57,14 @@ jobs:
               'def enviar_whatsapp',
               'def mp_request',
               'def registrar_pago_db',
+              'def require_admin',
+              'def scrape_zonaprop',
+              'def scrape_remax',
               '/api/pagos/crear',
               '/api/pagos/webhook',
               'CREATE TABLE IF NOT EXISTS pagos',
               'MP_ACCESS_TOKEN',
+              'plan_vence',
           ]
           faltantes = [c for c in checks if c not in code]
           if faltantes:
