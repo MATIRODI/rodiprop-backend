@@ -6,69 +6,75 @@
 <title>RodiProp Admin</title>
 <style>
 * { box-sizing: border-box; margin: 0; padding: 0; }
-body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #0f0f0f; color: #e5e5e5; min-height: 100vh; }
+body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #0a0e1a; color: #f1f5f9; min-height: 100vh; }
 
 /* LOGIN */
 #login-screen { display: flex; align-items: center; justify-content: center; min-height: 100vh; }
-.login-card { background: #1a1a1a; border: 1px solid #2a2a2a; border-radius: 12px; padding: 2.5rem; width: 340px; }
-.login-logo { font-size: 22px; font-weight: 600; color: #fff; margin-bottom: 0.25rem; }
-.login-logo span { color: #C9A84C; }
-.login-sub { font-size: 13px; color: #888; margin-bottom: 2rem; }
-.login-label { font-size: 12px; color: #888; margin-bottom: 6px; display: block; }
-.login-input { width: 100%; padding: 10px 12px; background: #0f0f0f; border: 1px solid #2a2a2a; border-radius: 8px; color: #e5e5e5; font-size: 14px; outline: none; }
-.login-input:focus { border-color: #C9A84C; }
-.login-btn { width: 100%; margin-top: 1.25rem; padding: 10px; background: #C9A84C; border: none; border-radius: 8px; color: #0f0f0f; font-size: 14px; font-weight: 600; cursor: pointer; }
-.login-btn:hover { background: #d4b45a; }
+.login-card { background: #111827; border: 1px solid #1f2937; border-radius: 12px; padding: 2.5rem; width: 340px; box-shadow: 0 20px 60px rgba(0,0,0,0.5); }
+.login-logo { font-size: 22px; font-weight: 700; color: #f1f5f9; margin-bottom: 0.25rem; letter-spacing: -0.02em; }
+.login-logo span { color: #3b82f6; }
+.login-sub { font-size: 13px; color: #64748b; margin-bottom: 2rem; }
+.login-label { font-size: 12px; color: #64748b; margin-bottom: 6px; display: block; font-weight: 500; }
+.login-input { width: 100%; padding: 10px 12px; background: #0a0e1a; border: 1px solid #1f2937; border-radius: 8px; color: #f1f5f9; font-size: 14px; outline: none; transition: border-color 0.15s; }
+.login-input:focus { border-color: #3b82f6; box-shadow: 0 0 0 3px rgba(59,130,246,0.12); }
+.login-btn { width: 100%; margin-top: 1.25rem; padding: 10px; background: #3b82f6; border: none; border-radius: 8px; color: #fff; font-size: 14px; font-weight: 600; cursor: pointer; transition: background 0.15s; }
+.login-btn:hover { background: #2563eb; }
 .login-error { font-size: 12px; color: #ef4444; margin-top: 8px; display: none; }
 
 /* PANEL */
 #panel-screen { display: none; padding: 1.5rem 2rem; max-width: 1200px; margin: 0 auto; }
-.header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 1.5rem; padding-bottom: 1rem; border-bottom: 1px solid #2a2a2a; }
-.logo { font-size: 18px; font-weight: 600; color: #fff; }
-.logo span { color: #C9A84C; }
-.header-right { display: flex; gap: 8px; align-items: center; }
-.wa-badge { display: flex; align-items: center; gap: 6px; font-size: 13px; padding: 5px 12px; border-radius: 8px; border: 1px solid #2a2a2a; color: #888; background: #1a1a1a; }
-.wa-dot { width: 8px; height: 8px; border-radius: 50%; background: #555; flex-shrink: 0; }
-.wa-dot.ok { background: #22c55e; }
-.btn { font-size: 13px; padding: 6px 14px; border-radius: 8px; border: 1px solid #2a2a2a; background: #1a1a1a; color: #e5e5e5; cursor: pointer; }
-.btn:hover { background: #252525; border-color: #3a3a3a; }
-.btn-gold { border-color: #C9A84C; color: #C9A84C; }
-.btn-gold:hover { background: rgba(201,168,76,0.1); }
-.section-title { font-size: 11px; font-weight: 600; color: #555; text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 0.75rem; }
-.metric-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin-bottom: 1.5rem; }
-.metric { background: #1a1a1a; border: 1px solid #2a2a2a; border-radius: 10px; padding: 1rem; }
-.metric-label { font-size: 12px; color: #666; margin-bottom: 4px; }
-.metric-value { font-size: 24px; font-weight: 600; color: #fff; }
-.metric-sub { font-size: 11px; color: #555; margin-top: 2px; }
+.header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 1.5rem; padding-bottom: 1rem; border-bottom: 1px solid #1f2937; }
+.logo { font-size: 18px; font-weight: 700; color: #f1f5f9; letter-spacing: -0.02em; }
+.logo span.blue { color: #3b82f6; }
+.logo span.dim { font-size: 13px; color: #475569; font-weight: 400; margin-left: 4px; }
+.header-right { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.system-status { display: flex; align-items: center; gap: 7px; font-size: 13px; padding: 6px 13px; border-radius: 8px; border: 1px solid rgba(16,185,129,0.4); color: #10b981; background: rgba(16,185,129,0.07); font-weight: 500; }
+.pulse-dot { width: 8px; height: 8px; border-radius: 50%; background: #10b981; flex-shrink: 0; animation: pulse 2s ease-in-out infinite; }
+@keyframes pulse { 0%,100% { opacity: 1; box-shadow: 0 0 0 0 rgba(16,185,129,0.5); } 60% { opacity: 0.9; box-shadow: 0 0 0 6px rgba(16,185,129,0); } }
+.prop-counter { font-size: 11px; font-weight: 600; background: rgba(16,185,129,0.12); border-radius: 6px; padding: 1px 7px; color: #34d399; margin-left: 2px; }
+.wa-badge { display: flex; align-items: center; gap: 6px; font-size: 13px; padding: 5px 12px; border-radius: 8px; border: 1px solid #1f2937; color: #64748b; background: #111827; }
+.wa-dot { width: 8px; height: 8px; border-radius: 50%; background: #374151; flex-shrink: 0; transition: background 0.3s; }
+.wa-dot.ok { background: #10b981; box-shadow: 0 0 6px rgba(16,185,129,0.4); }
+.btn { font-size: 13px; padding: 6px 14px; border-radius: 8px; border: 1px solid #1f2937; background: #111827; color: #f1f5f9; cursor: pointer; transition: background 0.15s, border-color 0.15s; }
+.btn:hover { background: #1f2937; border-color: #374151; }
+.btn-primary { border-color: #3b82f6; color: #3b82f6; }
+.btn-primary:hover { background: rgba(59,130,246,0.1); }
+.section-title { font-size: 11px; font-weight: 600; color: #374151; text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 0.75rem; }
+.metric-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(155px, 1fr)); gap: 10px; margin-bottom: 1.5rem; }
+.metric { background: #111827; border: 1px solid #1f2937; border-radius: 10px; padding: 1rem; transition: border-color 0.2s; }
+.metric:hover { border-color: #374151; }
+.metric-label { font-size: 12px; color: #64748b; margin-bottom: 4px; font-weight: 500; }
+.metric-value { font-size: 24px; font-weight: 700; color: #f1f5f9; letter-spacing: -0.02em; }
+.metric-sub { font-size: 11px; color: #475569; margin-top: 2px; }
 .actions { display: flex; gap: 8px; margin-bottom: 1.5rem; flex-wrap: wrap; }
-.alert-bar { display: flex; align-items: center; gap: 8px; padding: 10px 14px; border-radius: 8px; background: rgba(234,179,8,0.1); border: 1px solid rgba(234,179,8,0.3); font-size: 13px; color: #fbbf24; margin-bottom: 1rem; }
+.alert-bar { display: flex; align-items: center; gap: 8px; padding: 10px 14px; border-radius: 8px; background: rgba(245,158,11,0.07); border: 1px solid rgba(245,158,11,0.25); font-size: 13px; color: #f59e0b; margin-bottom: 1rem; }
 .charts-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 1.5rem; }
-.chart-card { background: #1a1a1a; border: 1px solid #2a2a2a; border-radius: 10px; padding: 1rem; }
-.chart-title { font-size: 12px; color: #666; margin-bottom: 0.75rem; font-weight: 500; }
-.tabs { display: flex; gap: 4px; margin-bottom: 1rem; border-bottom: 1px solid #2a2a2a; padding-bottom: 0; }
-.tab { font-size: 13px; padding: 7px 16px; border: none; cursor: pointer; color: #666; background: transparent; border-bottom: 2px solid transparent; margin-bottom: -1px; }
-.tab.active { color: #C9A84C; border-bottom-color: #C9A84C; }
-.tab:hover { color: #e5e5e5; }
-.table-wrap { background: #1a1a1a; border: 1px solid #2a2a2a; border-radius: 10px; overflow: hidden; margin-bottom: 1.5rem; overflow-x: auto; }
+.chart-card { background: #111827; border: 1px solid #1f2937; border-radius: 10px; padding: 1rem; }
+.chart-title { font-size: 12px; color: #64748b; margin-bottom: 0.75rem; font-weight: 500; text-transform: uppercase; letter-spacing: 0.05em; }
+.tabs { display: flex; gap: 4px; margin-bottom: 1rem; border-bottom: 1px solid #1f2937; padding-bottom: 0; }
+.tab { font-size: 13px; padding: 7px 16px; border: none; cursor: pointer; color: #64748b; background: transparent; border-bottom: 2px solid transparent; margin-bottom: -1px; transition: color 0.15s; font-weight: 500; }
+.tab.active { color: #3b82f6; border-bottom-color: #3b82f6; }
+.tab:hover { color: #f1f5f9; }
+.table-wrap { background: #111827; border: 1px solid #1f2937; border-radius: 10px; overflow: hidden; margin-bottom: 1.5rem; overflow-x: auto; }
 table { width: 100%; border-collapse: collapse; font-size: 13px; min-width: 600px; }
-th { padding: 9px 12px; text-align: left; font-weight: 500; font-size: 11px; color: #555; text-transform: uppercase; letter-spacing: 0.05em; border-bottom: 1px solid #2a2a2a; background: #141414; white-space: nowrap; }
-td { padding: 10px 12px; border-bottom: 1px solid #1f1f1f; color: #ccc; max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+th { padding: 9px 12px; text-align: left; font-weight: 600; font-size: 11px; color: #475569; text-transform: uppercase; letter-spacing: 0.05em; border-bottom: 1px solid #1f2937; background: #0d1320; white-space: nowrap; }
+td { padding: 10px 12px; border-bottom: 1px solid #161e2e; color: #94a3b8; max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 tr:last-child td { border-bottom: none; }
-tr:hover td { background: #1f1f1f; }
-.badge { display: inline-block; font-size: 11px; padding: 2px 8px; border-radius: 6px; font-weight: 500; }
-.badge-gratis { background: #252525; color: #888; }
-.badge-premium { background: rgba(234,179,8,0.15); color: #fbbf24; }
-.badge-inversor { background: rgba(59,130,246,0.15); color: #60a5fa; }
-.badge-approved { background: rgba(34,197,94,0.15); color: #4ade80; }
-.badge-pending { background: rgba(234,179,8,0.15); color: #fbbf24; }
-.badge-rejected, .badge-fail { background: rgba(239,68,68,0.15); color: #f87171; }
-.near-limit td { background: rgba(234,179,8,0.05) !important; }
-.spinner { display: inline-block; width: 14px; height: 14px; border: 2px solid #333; border-top-color: #888; border-radius: 50%; animation: spin 0.8s linear infinite; }
+tr:hover td { background: #141e30; }
+.badge { display: inline-block; font-size: 11px; padding: 2px 8px; border-radius: 6px; font-weight: 600; }
+.badge-gratis { background: #1f2937; color: #64748b; }
+.badge-premium { background: rgba(245,158,11,0.12); color: #f59e0b; }
+.badge-inversor { background: rgba(59,130,246,0.12); color: #60a5fa; }
+.badge-approved { background: rgba(16,185,129,0.12); color: #34d399; }
+.badge-pending { background: rgba(245,158,11,0.12); color: #f59e0b; }
+.badge-rejected, .badge-fail { background: rgba(239,68,68,0.12); color: #f87171; }
+.near-limit td { background: rgba(245,158,11,0.04) !important; }
+.spinner { display: inline-block; width: 14px; height: 14px; border: 2px solid #1f2937; border-top-color: #3b82f6; border-radius: 50%; animation: spin 0.8s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
-.empty { padding: 2rem; text-align: center; color: #444; font-size: 13px; }
-.logout-btn { font-size: 12px; color: #555; background: none; border: none; cursor: pointer; padding: 5px 10px; }
-.logout-btn:hover { color: #888; }
-@media(max-width: 600px) { #panel-screen { padding: 1rem; } .charts-grid { grid-template-columns: 1fr; } }
+.empty { padding: 2rem; text-align: center; color: #374151; font-size: 13px; }
+.logout-btn { font-size: 12px; color: #475569; background: none; border: none; cursor: pointer; padding: 5px 10px; transition: color 0.15s; }
+.logout-btn:hover { color: #94a3b8; }
+@media(max-width: 700px) { #panel-screen { padding: 1rem; } .charts-grid { grid-template-columns: 1fr; } .header { flex-wrap: wrap; gap: 10px; } }
 </style>
 </head>
 <body>
@@ -86,8 +92,9 @@ tr:hover td { background: #1f1f1f; }
 
 <div id="panel-screen">
   <div class="header">
-    <div class="logo">Rodi<span>Prop</span> <span style="font-size:13px;color:#555;font-weight:400;">Admin</span></div>
+    <div class="logo">Rodi<span class="blue">Prop</span><span class="dim">Admin</span></div>
     <div class="header-right">
+      <div class="system-status"><div class="pulse-dot"></div>Sistema Online<span class="prop-counter" id="prop-counter">—</span></div>
       <div class="wa-badge"><div class="wa-dot" id="wa-dot"></div><span id="wa-status">Verificando...</span></div>
       <button class="btn" onclick="loadAll()">↻ Actualizar</button>
       <button class="logout-btn" onclick="doLogout()">Salir</button>
@@ -104,7 +111,7 @@ tr:hover td { background: #1f1f1f; }
   </div>
 
   <div class="actions">
-    <button class="btn btn-gold" onclick="triggerScraper()">▶ Ejecutar scraper</button>
+    <button class="btn btn-primary" onclick="triggerScraper()">▶ Ejecutar scraper</button>
     <button class="btn" onclick="triggerAlertas()">📨 Test alertas</button>
     <a href="https://grateful-unity-production-1f47.up.railway.app/qr" target="_blank"><button class="btn">📱 Ver QR WhatsApp</button></a>
   </div>
@@ -240,6 +247,8 @@ async function loadMetrics() {
       <div class="metric"><div class="metric-label">Planes pagos</div><div class="metric-value">${pagosCount}</div></div>
       <div class="metric"><div class="metric-label">Ingresos totales</div><div class="metric-value">$${Math.round(ingresos).toLocaleString()}</div><div class="metric-sub">ARS</div></div>
       <div class="metric"><div class="metric-label">Fuentes activas</div><div class="metric-value">${Object.keys(s.por_fuente||{}).length}</div></div>`;
+    const counter = document.getElementById('prop-counter');
+    if(counter) counter.textContent = (s.total||0).toLocaleString() + ' props';
     renderChartFuentes(s.por_fuente||{});
     renderChartPlanes(u.por_plan||{});
   } catch(e) {}
@@ -292,7 +301,7 @@ async function loadProps() {
     const tb = document.getElementById('tabla-props');
     if(!props.length){tb.innerHTML='<tr><td colspan="6" class="empty">Sin propiedades</td></tr>';return;}
     tb.innerHTML = props.map(p=>`<tr>
-      <td><a href="${p.url}" target="_blank" style="color:#C9A84C;text-decoration:none;">${(p.titulo||'-').substring(0,45)}</a></td>
+      <td><a href="${p.url}" target="_blank" style="color:#3b82f6;text-decoration:none;">${(p.titulo||'-').substring(0,45)}</a></td>
       <td>${p.precio?Number(p.precio).toLocaleString():'-'}</td>
       <td>${p.moneda||'USD'}</td>
       <td>${(p.ubicacion||'-').substring(0,25)}</td>
@@ -310,14 +319,14 @@ function renderChartFuentes(data) {
   chartFuentes = new Chart(document.getElementById('chartFuentes'),{
     type:'doughnut',
     data:{labels,datasets:[{data:values,backgroundColor:colors.slice(0,labels.length),borderWidth:0}]},
-    options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'right',labels:{color:'#888',font:{size:11},boxWidth:10,padding:8}}}}
+    options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'right',labels:{color:'#64748b',font:{size:11},boxWidth:10,padding:8}}}}
   });
 }
 
 function renderChartPlanes(data) {
   const labels = Object.keys(data);
   const values = Object.values(data);
-  const colors = {gratis:'#444',premium:'#C9A84C',inversor:'#378ADD'};
+  const colors = {gratis:'#1f2937',premium:'#f59e0b',inversor:'#3b82f6'};
   if(chartPlanes) chartPlanes.destroy();
   chartPlanes = new Chart(document.getElementById('chartPlanes'),{
     type:'bar',
@@ -335,6 +344,7 @@ async function triggerAlertas() {
 
 async function loadAll() { checkWA(); loadMetrics(); loadUsuarios(); loadPagos(); loadProps(); }
 setInterval(checkWA, 30000);
+setInterval(loadMetrics, 60000);
 </script>
 </body>
 </html>

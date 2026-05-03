@@ -67,10 +67,25 @@ def detectar_moneda(texto):
         return "USD"
     return "ARS"
 
-def get_imagen(img):
-    """Extrae la URL de imagen probando múltiples atributos de lazy loading."""
+def get_imagen(img, card=None):
+    """Extrae la URL de imagen probando múltiples atributos de lazy loading y srcset."""
+    # picture > source[srcset] (e.g. ArgenProp, ZonaProp)
+    if card:
+        src_el = card.select_one("picture > source[srcset]") or card.select_one("source[srcset]")
+        if src_el:
+            srcset = src_el.get("srcset", "").strip()
+            if srcset:
+                first = srcset.split(",")[0].strip().split()[0]
+                if first and not first.startswith("data:"):
+                    return first
     if not img:
         return ""
+    # srcset on img element
+    srcset = img.get("srcset", "").strip()
+    if srcset:
+        first = srcset.split(",")[0].strip().split()[0]
+        if first and not first.startswith("data:") and first not in ("", "about:blank", "#"):
+            return first
     for attr in ["data-src", "data-lazy-src", "data-original", "data-lazy", "data-image", "src"]:
         val = img.get(attr, "").strip()
         if val and not val.startswith("data:") and val not in ("", "about:blank", "#"):
@@ -339,7 +354,7 @@ def scrape_ml(paginas=3):
                                     "moneda": m.text.strip() if m else "USD",
                                     "ubicacion": u.text.strip() if u else "",
                                     "url": l["href"] if l else "",
-                                    "imagen": get_imagen(img),
+                                    "imagen": get_imagen(img, card),
                                     "fuente": "MercadoLibre",
                                     "operacion": op,
                                     "atributos": [a.text.strip() for a in attrs],
@@ -398,7 +413,7 @@ def scrape_ap(paginas=20):
                         "titulo": titulo, "precio": precio, "moneda": moneda,
                         "ubicacion": u.text.strip() if u else "Córdoba",
                         "url": url_prop,
-                        "imagen": get_imagen(img),
+                        "imagen": get_imagen(img, card),
                         "fuente": "ArgenProp", "operacion": op, "atributos": [],
                     })
             except Exception:
@@ -491,7 +506,7 @@ def scrape_lavoz(paginas=15):
                             props.append({
                                 "titulo": titulo, "precio": precio, "moneda": "ARS",
                                 "ubicacion": ubicacion_raw, "url": url_prop,
-                                "imagen": get_imagen(img),
+                                "imagen": get_imagen(img, card),
                                 "fuente": "LaVoz", "operacion": op, "atributos": [],
                             })
                     except Exception:
@@ -601,7 +616,7 @@ def scrape_zonaprop(paginas=10):
                             if titulo or precio:
                                 nuevas.append({
                                     "titulo": titulo, "precio": precio, "moneda": moneda,
-                                    "ubicacion": ubicacion, "url": url_prop, "imagen": get_imagen(img),
+                                    "ubicacion": ubicacion, "url": url_prop, "imagen": get_imagen(img, card),
                                     "fuente": "ZonaProp", "operacion": op,
                                     "atributos": [a.text.strip() for a in attrs],
                                 })
@@ -707,7 +722,7 @@ def scrape_remax(paginas=10):
                             if titulo or precio:
                                 nuevas.append({
                                     "titulo": titulo, "precio": precio, "moneda": moneda,
-                                    "ubicacion": ubicacion, "url": url_prop, "imagen": get_imagen(img),
+                                    "ubicacion": ubicacion, "url": url_prop, "imagen": get_imagen(img, card),
                                     "fuente": "Remax", "operacion": op, "atributos": [],
                                 })
                         except Exception:
@@ -905,6 +920,36 @@ def propiedades():
 @app.route("/api/stats")
 def stats():
     return jsonify(stats_db())
+
+@app.route("/api/imagen")
+def proxy_imagen():
+    from flask import Response
+    from urllib.parse import urlparse
+    url = request.args.get("url", "").strip()
+    if not url or not url.startswith("http"):
+        return jsonify({"error": "URL requerida"}), 400
+    allowed_hosts = [
+        "mlstatic.com", "http2.mlstatic.com",
+        "zonaprop.com.ar", "cdn1.zonaprop.com.ar",
+        "argenprop.com", "cdn.argenprop.com",
+        "remax.com.ar",
+        "lavoz.com.ar", "clasificados.lavoz.com.ar",
+        "mercadolibre.com.ar", "mercadolibre.com",
+        "photos.zoocdn.com", "i.ibb.co",
+    ]
+    try:
+        parsed = urlparse(url)
+        if not any(h in parsed.netloc for h in allowed_hosts):
+            return jsonify({"error": "Host no permitido"}), 403
+        req = urllib.request.Request(url)
+        req.add_header("User-Agent", random.choice(USER_AGENTS))
+        req.add_header("Referer", parsed.scheme + "://" + parsed.netloc + "/")
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            data = resp.read()
+            ct = resp.headers.get("Content-Type", "image/jpeg").split(";")[0].strip()
+        return Response(data, mimetype=ct, headers={"Cache-Control": "public, max-age=86400"})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 502
 
 @app.route("/api/scraper/ejecutar", methods=["GET", "POST"])
 @require_admin
