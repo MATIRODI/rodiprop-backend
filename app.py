@@ -60,6 +60,23 @@ def limpiar_precio(raw):
     nums = re.sub(r'[^0-9]', '', raw)
     return nums if nums else ""
 
+def detectar_moneda(texto):
+    """Detecta si el precio está en USD o ARS según el texto del precio."""
+    t = str(texto).upper()
+    if any(k in t for k in ["US$", "USD", "U$S", "DOLAR", "DÓLAR"]):
+        return "USD"
+    return "ARS"
+
+def get_imagen(img):
+    """Extrae la URL de imagen probando múltiples atributos de lazy loading."""
+    if not img:
+        return ""
+    for attr in ["data-src", "data-lazy-src", "data-original", "data-lazy", "data-image", "src"]:
+        val = img.get(attr, "").strip()
+        if val and not val.startswith("data:") and val not in ("", "about:blank", "#"):
+            return val
+    return ""
+
 def get_conn():
     import pg8000.dbapi as pg
     print("Connecting to " + PG_HOST + ":" + str(PG_PORT) + " db=" + PG_DB)
@@ -118,6 +135,11 @@ def init_db():
             cur.execute(col_sql)
         except Exception:
             pass
+    # Corrección de datos históricos: LaVoz publica en ARS, no USD
+    try:
+        cur.execute("UPDATE propiedades SET moneda='ARS' WHERE fuente='LaVoz' AND moneda='USD'")
+    except Exception:
+        pass
     conn.commit()
     cur.close()
     conn.close()
@@ -317,7 +339,7 @@ def scrape_ml(paginas=3):
                                     "moneda": m.text.strip() if m else "USD",
                                     "ubicacion": u.text.strip() if u else "",
                                     "url": l["href"] if l else "",
-                                    "imagen": (img.get("data-src") or img.get("src", "")) if img else "",
+                                    "imagen": get_imagen(img),
                                     "fuente": "MercadoLibre",
                                     "operacion": op,
                                     "atributos": [a.text.strip() for a in attrs],
@@ -365,17 +387,18 @@ def scrape_ap(paginas=20):
                 u   = card.select_one(".card__address") or card.select_one("[class*='address']") or card.select_one("[class*='location']")
                 l   = card.select_one("a[href]")
                 img = card.select_one("img")
-                titulo    = t.text.strip() if t else ""
+                titulo     = t.text.strip() if t else ""
                 precio_raw = p.text.strip() if p else ""
-                precio    = precio_raw.split(" - ")[0].split("–")[0].strip() if precio_raw else ""
-                href      = l["href"] if l else ""
-                url_prop  = href if href.startswith("http") else "https://www.argenprop.com" + href
+                precio     = precio_raw.split(" - ")[0].split("–")[0].strip() if precio_raw else ""
+                moneda     = detectar_moneda(precio_raw)
+                href       = l["href"] if l else ""
+                url_prop   = href if href.startswith("http") else "https://www.argenprop.com" + href
                 if titulo or precio:
                     resultado.append({
-                        "titulo": titulo, "precio": precio, "moneda": "USD",
+                        "titulo": titulo, "precio": precio, "moneda": moneda,
                         "ubicacion": u.text.strip() if u else "Córdoba",
                         "url": url_prop,
-                        "imagen": (img.get("data-src") or img.get("src", "")) if img else "",
+                        "imagen": get_imagen(img),
                         "fuente": "ArgenProp", "operacion": op, "atributos": [],
                     })
             except Exception:
@@ -466,9 +489,9 @@ def scrape_lavoz(paginas=15):
                             ubicacion_raw = "Córdoba"
                         if titulo or precio:
                             props.append({
-                                "titulo": titulo, "precio": precio, "moneda": "USD",
+                                "titulo": titulo, "precio": precio, "moneda": "ARS",
                                 "ubicacion": ubicacion_raw, "url": url_prop,
-                                "imagen": (img.get("data-src") or img.get("src", "")) if img else "",
+                                "imagen": get_imagen(img),
                                 "fuente": "LaVoz", "operacion": op, "atributos": [],
                             })
                     except Exception:
@@ -566,18 +589,19 @@ def scrape_zonaprop(paginas=10):
                             img   = card.select_one("img")
                             attrs = card.select(".postingCardAttribute")
                             titulo = t_el.text.strip() if t_el else ""
-                            precio = ""
+                            precio_raw = ""
                             if p_el:
-                                precio = re.sub(r'[^0-9]', '', p_el.get("data-price", "") or p_el.text)
+                                precio_raw = p_el.get("data-price", "") or p_el.text
+                            precio = re.sub(r'[^0-9]', '', precio_raw)
+                            moneda = detectar_moneda(precio_raw)
                             ubicacion = u_el.text.strip() if u_el else "Córdoba"
                             href = l_el["href"] if l_el else ""
                             url_prop = ("https://www.zonaprop.com.ar" + href
                                         if href and not href.startswith("http") else href)
-                            imagen = (img.get("data-src") or img.get("src", "")) if img else ""
                             if titulo or precio:
                                 nuevas.append({
-                                    "titulo": titulo, "precio": precio, "moneda": "USD",
-                                    "ubicacion": ubicacion, "url": url_prop, "imagen": imagen,
+                                    "titulo": titulo, "precio": precio, "moneda": moneda,
+                                    "ubicacion": ubicacion, "url": url_prop, "imagen": get_imagen(img),
                                     "fuente": "ZonaProp", "operacion": op,
                                     "atributos": [a.text.strip() for a in attrs],
                                 })
@@ -673,16 +697,17 @@ def scrape_remax(paginas=10):
                             l_el  = card.select_one("a[href]")
                             img   = card.select_one("img")
                             titulo = t_el.text.strip() if t_el else ""
-                            precio = re.sub(r'[^0-9]', '', p_el.text.strip()) if p_el else ""
+                            precio_raw = p_el.text.strip() if p_el else ""
+                            precio = re.sub(r'[^0-9]', '', precio_raw)
+                            moneda = detectar_moneda(precio_raw)
                             ubicacion = u_el.text.strip() if u_el else "Córdoba"
                             href = l_el["href"] if l_el else ""
                             url_prop = (href if href.startswith("http")
                                         else "https://www.remax.com.ar" + href)
-                            imagen = (img.get("data-src") or img.get("src", "")) if img else ""
                             if titulo or precio:
                                 nuevas.append({
-                                    "titulo": titulo, "precio": precio, "moneda": "USD",
-                                    "ubicacion": ubicacion, "url": url_prop, "imagen": imagen,
+                                    "titulo": titulo, "precio": precio, "moneda": moneda,
+                                    "ubicacion": ubicacion, "url": url_prop, "imagen": get_imagen(img),
                                     "fuente": "Remax", "operacion": op, "atributos": [],
                                 })
                         except Exception:
@@ -1167,12 +1192,13 @@ def fix_moneda():
     try:
         conn = get_conn()
         cur = conn.cursor()
-        cur.execute("UPDATE propiedades SET moneda='USD' WHERE fuente='LaVoz' AND moneda='ARS'")
-        updated = cur.rowcount
+        # LaVoz publica en ARS, no USD
+        cur.execute("UPDATE propiedades SET moneda='ARS' WHERE fuente='LaVoz'")
+        lavoz = cur.rowcount
         conn.commit()
         cur.close()
         conn.close()
-        return jsonify({"status": "ok", "actualizadas": updated})
+        return jsonify({"status": "ok", "lavoz_corregidas": lavoz})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
