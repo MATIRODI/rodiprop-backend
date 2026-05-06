@@ -23,7 +23,7 @@ jobs:
           python-version: '3.11'
 
       - name: Instalar dependencias
-        run: pip install flask flask-cors requests beautifulsoup4 pg8000
+        run: pip install flask flask-cors requests beautifulsoup4 pg8000 "scrapling[fetchers]"
 
       - name: Verificar sintaxis Python
         run: |

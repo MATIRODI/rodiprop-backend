@@ -48,6 +48,48 @@ USER_AGENTS = [
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36",
 ]
 
+# ─── SCRAPLING HTTP WRAPPER ─────────────────────────────────────────────────
+# Scrapling usa curl_cffi para imitar el TLS fingerprint de Chrome real,
+# eludiendo la mayoría de los anti-bot sin necesitar un navegador headless.
+# Fallback transparente a requests si no está instalado.
+
+try:
+    from scrapling.fetchers import Fetcher as _SF, FetcherSession as _SFS
+    _SCRAPLING = True
+    print("Scrapling OK — fingerprint anti-bot activo")
+except Exception:
+    _SCRAPLING = False
+    print("Scrapling no disponible — usando requests")
+
+def _http_get(url, sess=None, timeout=15):
+    """GET con TLS fingerprint (Scrapling) o requests como fallback. Retorna (html, status)."""
+    if _SCRAPLING:
+        try:
+            if sess and getattr(sess, '_is_scrapling', False):
+                resp = sess.get(url, stealthy_headers=True, timeout=timeout)
+            else:
+                resp = _SF.get(url, stealthy_headers=True, timeout=timeout)
+            return resp.html_content, getattr(resp, 'status', 200)
+        except Exception as e:
+            print("Scrapling get error: " + str(e))
+    h = get_headers()
+    if sess and not getattr(sess, '_is_scrapling', False):
+        r = sess.get(url, headers=h, timeout=timeout)
+    else:
+        r = requests.get(url, headers=h, timeout=timeout)
+    return r.text, r.status_code
+
+def _http_session():
+    """Sesión HTTP reutilizable (Scrapling FetcherSession o requests.Session)."""
+    if _SCRAPLING:
+        try:
+            s = _SFS(stealthy_headers=True)
+            s._is_scrapling = True
+            return s
+        except Exception:
+            pass
+    return requests.Session()
+
 # ─── HELPERS ────────────────────────────────────────────────────────────────
 
 def get_headers():
@@ -336,8 +378,8 @@ def scrape_ml(paginas=3):
                 try:
                     url = ("https://inmuebles.mercadolibre.com.ar/" + op + "/" + localidad
                            + "/_Desde_" + str(i * 48 + 1) + "_DisplayType_G")
-                    r = requests.get(url, headers=get_headers(), timeout=15)
-                    soup = BeautifulSoup(r.text, "html.parser")
+                    html, status = _http_get(url, timeout=15)
+                    soup = BeautifulSoup(html, "html.parser")
                     for card in soup.select(".ui-search-layout__item"):
                         try:
                             t   = card.select_one(".poly-component__title")
@@ -369,9 +411,9 @@ def scrape_ml(paginas=3):
 
 def scrape_ap(paginas=20):
     props = []
-    s = requests.Session()
+    s = _http_session()
     try:
-        s.get("https://www.argenprop.com", headers=get_headers(), timeout=10)
+        _http_get("https://www.argenprop.com", sess=s, timeout=10)
     except Exception:
         pass
 
@@ -426,11 +468,11 @@ def scrape_ap(paginas=20):
                 try:
                     url = ("https://www.argenprop.com/propiedades-en-" + op
                            + "-en-" + loc_slug + "--pagina-" + str(i))
-                    r = s.get(url, headers=get_headers(), timeout=15)
-                    if r.status_code in [403, 429]:
+                    html, status = _http_get(url, sess=s, timeout=15)
+                    if status in [403, 429]:
                         time.sleep(random.uniform(5, 10))
                         break
-                    soup = BeautifulSoup(r.text, "html.parser")
+                    soup = BeautifulSoup(html, "html.parser")
                     cards = soup.select(".listing__item") or soup.select("article.card")
                     if not cards:
                         break
@@ -449,10 +491,10 @@ def scrape_ap(paginas=20):
             try:
                 url = ("https://www.argenprop.com/propiedades-en-" + op
                        + "-en-provincia-cordoba--pagina-" + str(i))
-                r = s.get(url, headers=get_headers(), timeout=15)
-                if r.status_code in [403, 429]:
+                html, status = _http_get(url, sess=s, timeout=15)
+                if status in [403, 429]:
                     break
-                soup = BeautifulSoup(r.text, "html.parser")
+                soup = BeautifulSoup(html, "html.parser")
                 cards = soup.select(".listing__item") or soup.select("article.card")
                 if not cards:
                     break
@@ -470,19 +512,19 @@ def scrape_ap(paginas=20):
 
 def scrape_lavoz(paginas=15):
     props = []
-    s = requests.Session()
+    s = _http_session()
     try:
-        s.get("https://clasificados.lavoz.com.ar", headers=get_headers(), timeout=10)
+        _http_get("https://clasificados.lavoz.com.ar", sess=s, timeout=10)
     except Exception:
         pass
     for op, slug in [("venta", "venta"), ("alquiler", "alquiler")]:
         for i in range(1, paginas + 1):
             try:
                 url = "https://clasificados.lavoz.com.ar/inmuebles/" + slug + "?page=" + str(i)
-                r = s.get(url, headers=get_headers(), timeout=20)
-                if r.status_code in [403, 429]:
+                html, status = _http_get(url, sess=s, timeout=20)
+                if status in [403, 429]:
                     break
-                soup = BeautifulSoup(r.text, "html.parser")
+                soup = BeautifulSoup(html, "html.parser")
                 cards = soup.select(".aviso") or soup.select("article") or soup.select(".card")
                 for card in cards:
                     try:
@@ -519,9 +561,9 @@ def scrape_lavoz(paginas=15):
 
 def scrape_zonaprop(paginas=10):
     props = []
-    s = requests.Session()
+    s = _http_session()
     try:
-        s.get("https://www.zonaprop.com.ar", headers=get_headers(), timeout=10)
+        _http_get("https://www.zonaprop.com.ar", sess=s, timeout=10)
     except Exception:
         pass
     for op, slug in [("venta", "venta"), ("alquiler", "alquiler")]:
@@ -532,11 +574,11 @@ def scrape_zonaprop(paginas=10):
                 else:
                     url = ("https://www.zonaprop.com.ar/inmuebles-" + slug
                            + "-cordoba-pagina-" + str(i) + ".html")
-                r = s.get(url, headers=get_headers(), timeout=20)
-                if r.status_code in [403, 429]:
+                html, status = _http_get(url, sess=s, timeout=20)
+                if status in [403, 429]:
                     time.sleep(random.uniform(10, 20))
                     break
-                soup = BeautifulSoup(r.text, "html.parser")
+                soup = BeautifulSoup(html, "html.parser")
                 nuevas = []
 
                 # Intentar extraer datos del script __NEXT_DATA__ (Next.js)
@@ -635,9 +677,9 @@ def scrape_zonaprop(paginas=10):
 
 def scrape_remax(paginas=10):
     props = []
-    s = requests.Session()
+    s = _http_session()
     try:
-        s.get("https://www.remax.com.ar", headers=get_headers(), timeout=10)
+        _http_get("https://www.remax.com.ar", sess=s, timeout=10)
     except Exception:
         pass
 
@@ -647,11 +689,11 @@ def scrape_remax(paginas=10):
                 url = ("https://www.remax.com.ar/" + slug +
                        "/propiedades/cordoba--provincia" +
                        ("" if i == 1 else "?page=" + str(i)))
-                r = s.get(url, headers=get_headers(), timeout=20)
-                if r.status_code in [403, 429]:
+                html, status = _http_get(url, sess=s, timeout=20)
+                if status in [403, 429]:
                     time.sleep(random.uniform(10, 20))
                     break
-                soup = BeautifulSoup(r.text, "html.parser")
+                soup = BeautifulSoup(html, "html.parser")
                 nuevas = []
 
                 # Intentar extraer datos del script __NEXT_DATA__ (Next.js)
