@@ -2,8 +2,10 @@ from flask import Flask, jsonify, request, redirect
 from flask_cors import CORS
 from functools import wraps
 import os, threading, time, requests, random, json, re, urllib.request, urllib.parse, base64
+import hmac, hashlib, secrets
 from bs4 import BeautifulSoup
 from datetime import datetime
+from werkzeug.security import generate_password_hash, check_password_hash
 
 app = Flask(__name__)
 CORS(app)
@@ -26,22 +28,52 @@ MP_ACCESS_TOKEN  = os.environ.get("MP_ACCESS_TOKEN", "")
 MP_CLIENT_SECRET = os.environ.get("MP_CLIENT_SECRET", "")
 BACKEND_URL  = os.environ.get("BACKEND_URL", "https://web-production-88fd4.up.railway.app")
 FRONTEND_URL = os.environ.get("FRONTEND_URL", "https://rodiprop.gruporodi.com.ar")
-MI_WHATSAPP  = os.environ.get("MI_WHATSAPP", "")  # tu número personal para notificaciones
+MI_WHATSAPP  = os.environ.get("MI_WHATSAPP", "")
+JWT_SECRET   = os.environ.get("JWT_SECRET", "rodiprop-jwt-secret-2026")
 
 PLANES = {
     "premium": {
         "nombre": "RodiProp Premium",
         "precio": 4999,
         "moneda": "ARS",
-        "descripcion": "Alertas ilimitadas por WhatsApp + filtros avanzados",
+        "descripcion": "Alertas ilimitadas por WhatsApp + portal privado",
     },
     "inversor": {
         "nombre": "RodiProp Inversor",
         "precio": 15000,
         "moneda": "ARS",
-        "descripcion": "Todo Premium + Tasador de Propiedades + Analytics",
+        "descripcion": "Todo Premium + analytics de mercado + créditos",
+    },
+    "analitic": {
+        "nombre": "RodiProp Analítics",
+        "precio": 25000,
+        "moneda": "ARS",
+        "descripcion": "Zonas en auge, tendencia de precios, cotizaciones en tiempo real",
     },
 }
+
+ANALYTICS_PLANS = {"inversor", "analitic"}
+
+CREDITOS_HIPOTECARIOS = [
+    {"banco": "Banco de la Nación Argentina", "sigla": "BNA", "producto": "Crédito UVA Tu Casa",
+     "tasa": 3.5, "tipo_tasa": "UVA + 3.5% TNA", "plazo_max": 30, "financiacion_max": 80,
+     "descripcion": "Vivienda única, familiar y de ocupación permanente.", "color": "#004A87"},
+    {"banco": "Banco de Córdoba", "sigla": "BANCOR", "producto": "Hipotecario UVA",
+     "tasa": 4.0, "tipo_tasa": "UVA + 4.0% TNA", "plazo_max": 20, "financiacion_max": 75,
+     "descripcion": "Exclusivo residentes de Córdoba. Primera y segunda vivienda.", "color": "#C8102E"},
+    {"banco": "Banco Santander", "sigla": "SAN", "producto": "Hipotecario UVA",
+     "tasa": 4.5, "tipo_tasa": "UVA + 4.5% TNA", "plazo_max": 30, "financiacion_max": 80,
+     "descripcion": "Para clientes y no clientes. Vivienda única y permanente.", "color": "#EC0000"},
+    {"banco": "Banco Galicia", "sigla": "GCE", "producto": "Crédito Hipotecario UVA",
+     "tasa": 5.0, "tipo_tasa": "UVA + 5.0% TNA", "plazo_max": 25, "financiacion_max": 75,
+     "descripcion": "Clientes con cuenta sueldo. Trámite 100% digital.", "color": "#CC0000"},
+    {"banco": "BBVA Argentina", "sigla": "BBVA", "producto": "Préstamo Hipotecario UVA",
+     "tasa": 4.8, "tipo_tasa": "UVA + 4.8% TNA", "plazo_max": 30, "financiacion_max": 80,
+     "descripcion": "Disponible para clientes y no clientes del banco.", "color": "#004B93"},
+    {"banco": "Banco Macro", "sigla": "BMA", "producto": "Crédito Hipotecario UVA",
+     "tasa": 5.2, "tipo_tasa": "UVA + 5.2% TNA", "plazo_max": 25, "financiacion_max": 70,
+     "descripcion": "Personas físicas con relación de dependencia.", "color": "#F5A623"},
+]
 
 USER_AGENTS = [
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36",
@@ -187,6 +219,7 @@ def init_db():
         "ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS cocheras TEXT DEFAULT ''",
         "ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS alertas_enviadas_count INTEGER DEFAULT 0",
         "ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS plan_vence TIMESTAMP",
+        "ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS password_hash TEXT",
     ]:
         try:
             cur.execute(col_sql)
@@ -1610,6 +1643,311 @@ def wa_status():
         return jsonify(r.json())
     except Exception:
         return jsonify({"ready": False})
+
+# ─── AUTH ─────────────────────────────────────────────────────────────────────
+
+def _make_token(user_id):
+    ts = str(int(time.time()))
+    uid = str(user_id)
+    payload = f"{uid}:{ts}"
+    sig = hmac.new(JWT_SECRET.encode(), payload.encode(), hashlib.sha256).hexdigest()[:24]
+    raw = f"{payload}:{sig}"
+    return base64.b64encode(raw.encode()).decode().rstrip("=")
+
+def _verify_token(token):
+    try:
+        pad = (4 - len(token) % 4) % 4
+        decoded = base64.b64decode(token + "=" * pad).decode()
+        parts = decoded.rsplit(":", 1)
+        sig = parts[1]
+        payload = parts[0]
+        expected = hmac.new(JWT_SECRET.encode(), payload.encode(), hashlib.sha256).hexdigest()[:24]
+        if not hmac.compare_digest(sig, expected):
+            return None
+        uid_str, ts_str = payload.split(":", 1)
+        if int(time.time()) - int(ts_str) > 30 * 24 * 3600:
+            return None
+        return int(uid_str)
+    except Exception:
+        return None
+
+def _get_token():
+    auth = request.headers.get("Authorization", "")
+    if auth.startswith("Bearer "):
+        return auth[7:]
+    return request.args.get("token") or (request.get_json(silent=True) or {}).get("token")
+
+def require_auth(f):
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        token = _get_token()
+        user_id = _verify_token(token) if token else None
+        if not user_id:
+            return jsonify({"error": "No autorizado"}), 401
+        request.user_id = user_id
+        return f(*args, **kwargs)
+    return decorated
+
+@app.route("/api/auth/register", methods=["POST", "OPTIONS"])
+def auth_register():
+    if request.method == "OPTIONS":
+        return jsonify({}), 200
+    data = request.get_json() or {}
+    email = data.get("email", "").strip().lower()
+    password = data.get("password", "").strip()
+    nombre = data.get("nombre", "").strip()
+    whatsapp = data.get("whatsapp", "").strip()
+    if not email or not password:
+        return jsonify({"error": "Email y contraseña requeridos"}), 400
+    if len(password) < 6:
+        return jsonify({"error": "La contraseña debe tener al menos 6 caracteres"}), 400
+    pw_hash = generate_password_hash(password)
+    try:
+        conn = get_conn()
+        cur = conn.cursor()
+        cur.execute("SELECT id, plan FROM usuarios WHERE email=%s", (email,))
+        existing = cur.fetchone()
+        if existing:
+            user_id, plan = existing
+            cur.execute("UPDATE usuarios SET password_hash=%s WHERE email=%s", (pw_hash, email))
+        else:
+            cur.execute(
+                "INSERT INTO usuarios (nombre, email, whatsapp, zona, tipo, operacion, plan, password_hash)"
+                " VALUES (%s,%s,%s,'','','venta','gratis',%s) RETURNING id, plan",
+                (nombre or email.split("@")[0], email, whatsapp, pw_hash)
+            )
+            user_id, plan = cur.fetchone()
+        conn.commit()
+        cur.close(); conn.close()
+        token = _make_token(user_id)
+        return jsonify({"token": token, "user": {"id": user_id, "email": email, "plan": plan, "nombre": nombre}})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/api/auth/login", methods=["POST", "OPTIONS"])
+def auth_login():
+    if request.method == "OPTIONS":
+        return jsonify({}), 200
+    data = request.get_json() or {}
+    email = data.get("email", "").strip().lower()
+    password = data.get("password", "").strip()
+    if not email or not password:
+        return jsonify({"error": "Email y contraseña requeridos"}), 400
+    try:
+        conn = get_conn()
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT id, nombre, email, plan, password_hash FROM usuarios WHERE email=%s AND activo=TRUE",
+            (email,)
+        )
+        row = cur.fetchone()
+        cur.close(); conn.close()
+        if not row:
+            return jsonify({"error": "Usuario no encontrado"}), 404
+        user_id, nombre, email_db, plan, pw_hash = row
+        if not pw_hash:
+            return jsonify({"error": "Esta cuenta no tiene contraseña. Usá 'Crear cuenta' para establecer una."}), 400
+        if not check_password_hash(pw_hash, password):
+            return jsonify({"error": "Contraseña incorrecta"}), 401
+        token = _make_token(user_id)
+        return jsonify({"token": token, "user": {"id": user_id, "email": email_db, "plan": plan, "nombre": nombre}})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/api/auth/me")
+@require_auth
+def auth_me():
+    try:
+        conn = get_conn()
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT id, nombre, email, whatsapp, zona, tipo, operacion,"
+            " precio_min, precio_max, ambientes, cocheras, plan, alertas_enviadas_count, plan_vence"
+            " FROM usuarios WHERE id=%s AND activo=TRUE",
+            (request.user_id,)
+        )
+        row = cur.fetchone()
+        cur.close(); conn.close()
+        if not row:
+            return jsonify({"error": "Usuario no encontrado"}), 404
+        cols = ["id", "nombre", "email", "whatsapp", "zona", "tipo", "operacion",
+                "precio_min", "precio_max", "ambientes", "cocheras", "plan",
+                "alertas_enviadas_count", "plan_vence"]
+        u = dict(zip(cols, row))
+        if u.get("plan_vence"):
+            u["plan_vence"] = str(u["plan_vence"])
+        return jsonify(u)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/api/auth/update", methods=["POST", "OPTIONS"])
+@require_auth
+def auth_update():
+    if request.method == "OPTIONS":
+        return jsonify({}), 200
+    data = request.get_json() or {}
+    try:
+        conn = get_conn()
+        cur = conn.cursor()
+        fields = ["zona", "tipo", "operacion", "precio_min", "precio_max",
+                  "ambientes", "cocheras", "whatsapp", "nombre"]
+        updates = {k: data[k] for k in fields if k in data}
+        if not updates:
+            return jsonify({"error": "Nada que actualizar"}), 400
+        sets = ", ".join(f"{k}=%s" for k in updates)
+        vals = list(updates.values()) + [request.user_id]
+        cur.execute(f"UPDATE usuarios SET {sets} WHERE id=%s", vals)
+        if "new_password" in data and len(data["new_password"]) >= 6:
+            cur.execute("UPDATE usuarios SET password_hash=%s WHERE id=%s",
+                        (generate_password_hash(data["new_password"]), request.user_id))
+        conn.commit()
+        cur.close(); conn.close()
+        return jsonify({"status": "ok"})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+# ─── MARKET DATA ──────────────────────────────────────────────────────────────
+
+@app.route("/api/dolar")
+def cotizacion_dolar():
+    try:
+        req = urllib.request.Request(
+            "https://dolarapi.com/v1/dolares",
+            headers={"User-Agent": "RodiProp/1.0", "Accept": "application/json"}
+        )
+        data = json.loads(urllib.request.urlopen(req, timeout=6).read())
+        return jsonify({"dolares": data, "actualizado": datetime.now().isoformat()})
+    except Exception as e:
+        return jsonify({"error": str(e), "dolares": []}), 200
+
+@app.route("/api/creditos")
+def creditos_hipotecarios():
+    return jsonify({"creditos": CREDITOS_HIPOTECARIOS})
+
+# ─── ANALYTICS ────────────────────────────────────────────────────────────────
+
+@app.route("/api/analytics/zonas")
+@require_auth
+def analytics_zonas():
+    try:
+        conn = get_conn()
+        cur = conn.cursor()
+        cur.execute("SELECT plan FROM usuarios WHERE id=%s", (request.user_id,))
+        row = cur.fetchone()
+        if not row or row[0] not in ANALYTICS_PLANS:
+            cur.close(); conn.close()
+            return jsonify({"error": "Requiere plan Analítics o Inversor", "upgrade": True}), 403
+        # Zonas con más usuarios buscando + propiedades disponibles
+        cur.execute("""
+            SELECT
+                u.zona,
+                COUNT(DISTINCT u.id) AS usuarios_buscando,
+                COUNT(DISTINCT p.id) AS props_disponibles,
+                ROUND(AVG(u.precio_max)::NUMERIC) AS presupuesto_promedio
+            FROM usuarios u
+            LEFT JOIN propiedades p
+                ON p.fecha > NOW() - INTERVAL '30 days'
+                AND LOWER(p.ubicacion) LIKE '%' || LOWER(u.zona) || '%'
+            WHERE u.activo = TRUE AND u.zona != '' AND LENGTH(u.zona) > 2
+            GROUP BY u.zona
+            ORDER BY usuarios_buscando DESC, props_disponibles DESC
+            LIMIT 12
+        """)
+        rows = cur.fetchall()
+        # New listings per zone this week vs last week
+        cur.execute("""
+            SELECT
+                TRIM(SPLIT_PART(ubicacion, ',', 1)) AS zona,
+                COUNT(CASE WHEN fecha > NOW() - INTERVAL '7 days' THEN 1 END) AS esta_semana,
+                COUNT(CASE WHEN fecha BETWEEN NOW() - INTERVAL '14 days' AND NOW() - INTERVAL '7 days' THEN 1 END) AS semana_pasada
+            FROM propiedades
+            WHERE fecha > NOW() - INTERVAL '14 days'
+              AND ubicacion IS NOT NULL AND ubicacion != ''
+            GROUP BY zona
+            HAVING COUNT(*) >= 2
+            ORDER BY esta_semana DESC
+            LIMIT 15
+        """)
+        prop_rows = cur.fetchall()
+        cur.close(); conn.close()
+
+        demanda = []
+        for r in rows:
+            zona, users, props, budget = r
+            demanda.append({"zona": zona, "usuarios_buscando": users,
+                            "props_disponibles": props or 0,
+                            "presupuesto_promedio": float(budget) if budget else 0})
+
+        oferta = []
+        for r in prop_rows:
+            zona, esta, pasada = r
+            delta = esta - (pasada or 0)
+            pct = round((delta / max(pasada or 1, 1)) * 100, 1)
+            oferta.append({"zona": zona, "esta_semana": esta, "semana_pasada": pasada or 0,
+                           "delta": delta, "pct_cambio": pct,
+                           "tendencia": "alza" if pct > 15 else ("baja" if pct < -15 else "estable")})
+
+        return jsonify({"demanda": demanda, "oferta": oferta})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/api/analytics/precios")
+@require_auth
+def analytics_precios():
+    try:
+        conn = get_conn()
+        cur = conn.cursor()
+        cur.execute("SELECT plan FROM usuarios WHERE id=%s", (request.user_id,))
+        row = cur.fetchone()
+        if not row or row[0] not in ANALYTICS_PLANS:
+            cur.close(); conn.close()
+            return jsonify({"error": "Requiere plan Analítics o Inversor", "upgrade": True}), 403
+        cur.execute("""
+            WITH recent AS (
+                SELECT operacion, moneda,
+                    ROUND(AVG(NULLIF(REGEXP_REPLACE(precio, '[^0-9]', '', 'g'), '')::BIGINT)::NUMERIC) AS avg_precio,
+                    COUNT(*) AS cnt
+                FROM propiedades
+                WHERE fecha > NOW() - INTERVAL '14 days'
+                  AND precio ~ '[0-9]{4,}'
+                GROUP BY operacion, moneda
+            ),
+            anterior AS (
+                SELECT operacion, moneda,
+                    ROUND(AVG(NULLIF(REGEXP_REPLACE(precio, '[^0-9]', '', 'g'), '')::BIGINT)::NUMERIC) AS avg_precio,
+                    COUNT(*) AS cnt
+                FROM propiedades
+                WHERE fecha BETWEEN NOW() - INTERVAL '60 days' AND NOW() - INTERVAL '14 days'
+                  AND precio ~ '[0-9]{4,}'
+                GROUP BY operacion, moneda
+            )
+            SELECT r.operacion, r.moneda,
+                   r.avg_precio AS precio_reciente, r.cnt AS cnt_reciente,
+                   a.avg_precio AS precio_anterior, a.cnt AS cnt_anterior,
+                   CASE WHEN a.avg_precio > 0
+                        THEN ROUND(((r.avg_precio - a.avg_precio) / a.avg_precio * 100)::NUMERIC, 1)
+                   END AS pct_cambio
+            FROM recent r
+            LEFT JOIN anterior a USING (operacion, moneda)
+            WHERE r.cnt >= 5
+            ORDER BY r.operacion, r.moneda
+        """)
+        rows = cur.fetchall()
+        cur.close(); conn.close()
+        cols = ["operacion", "moneda", "precio_reciente", "cnt_reciente",
+                "precio_anterior", "cnt_anterior", "pct_cambio"]
+        result = []
+        for r in rows:
+            d = dict(zip(cols, r))
+            for k in ["precio_reciente", "precio_anterior", "pct_cambio"]:
+                if d[k] is not None:
+                    d[k] = float(d[k])
+            pct = d.get("pct_cambio")
+            d["tendencia"] = "alza" if pct and pct > 3 else ("baja" if pct and pct < -3 else "estable")
+            result.append(d)
+        return jsonify({"precios": result})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 # ─── INIT ─────────────────────────────────────────────────────────────────────
 
