@@ -29,7 +29,7 @@ MP_CLIENT_SECRET = os.environ.get("MP_CLIENT_SECRET", "")
 BACKEND_URL  = os.environ.get("BACKEND_URL", "https://web-production-88fd4.up.railway.app")
 FRONTEND_URL = os.environ.get("FRONTEND_URL", "https://rodiprop.gruporodi.com.ar")
 MI_WHATSAPP  = os.environ.get("MI_WHATSAPP", "")
-JWT_SECRET   = os.environ.get("JWT_SECRET", "rodiprop-jwt-secret-2026")
+JWT_SECRET   = os.environ.get("JWT_SECRET", "f41ed397354d4e63f0161af7de29fee29c6a32d85c08cbeeefab6dfca87ee4a1")
 
 PLANES = {
     "premium": {
