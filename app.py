@@ -1280,7 +1280,7 @@ def property_share_page():
     titulo = "Propiedad en Córdoba"
     descripcion = "Encontrá propiedades en Córdoba en RodiProp"
     imagen = ""
-    redirect_target = prop_url or FRONTEND_URL
+    redirect_target = FRONTEND_URL
 
     if prop_url:
         try:
