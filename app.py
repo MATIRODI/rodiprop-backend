@@ -1736,6 +1736,29 @@ def auth_login():
     if not email or not password:
         return jsonify({"error": "Email y contraseña requeridos"}), 400
     try:
+        is_admin_login = email.lower() == ADMIN_EMAIL.lower()
+        admin_pwd = os.environ.get("ADMIN_PASSWORD", "")
+
+        # Admin puede ingresar con ADMIN_PASSWORD sin necesidad de registrarse
+        if is_admin_login and admin_pwd and password == admin_pwd:
+            conn = get_conn()
+            cur = conn.cursor()
+            cur.execute("SELECT id, nombre, plan FROM usuarios WHERE email=%s", (email,))
+            row = cur.fetchone()
+            if not row:
+                # Auto-crear cuenta admin si no existe
+                cur.execute(
+                    "INSERT INTO usuarios (nombre, email, whatsapp, zona, tipo, operacion, plan)"
+                    " VALUES (%s,%s,'','','','venta','inversor') RETURNING id, nombre, plan",
+                    ("Administrador", email)
+                )
+                row = cur.fetchone()
+                conn.commit()
+            cur.close(); conn.close()
+            user_id, nombre, plan = row
+            token = _make_token(user_id)
+            return jsonify({"token": token, "user": {"id": user_id, "email": email, "plan": plan, "nombre": nombre or "Administrador", "is_admin": True}})
+
         conn = get_conn()
         cur = conn.cursor()
         cur.execute(
