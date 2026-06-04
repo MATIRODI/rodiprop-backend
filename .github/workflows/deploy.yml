@@ -60,6 +60,7 @@ jobs:
               'def require_admin',
               'def scrape_zonaprop',
               'def scrape_remax',
+              'def scrape_navent',
               '/api/pagos/crear',
               '/api/pagos/webhook',
               'CREATE TABLE IF NOT EXISTS pagos',
