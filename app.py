@@ -1754,8 +1754,13 @@ def auth_login():
                 )
                 row = cur.fetchone()
                 conn.commit()
-            cur.close(); conn.close()
             user_id, nombre, plan = row
+            # Asegurar que el admin siempre tenga plan inversor
+            if plan not in ("inversor", "analitic"):
+                cur.execute("UPDATE usuarios SET plan='inversor' WHERE id=%s", (user_id,))
+                conn.commit()
+                plan = "inversor"
+            cur.close(); conn.close()
             token = _make_token(user_id)
             return jsonify({"token": token, "user": {"id": user_id, "email": email, "plan": plan, "nombre": nombre or "Administrador", "is_admin": True}})
 
