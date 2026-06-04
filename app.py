@@ -30,6 +30,7 @@ BACKEND_URL  = os.environ.get("BACKEND_URL", "https://web-production-88fd4.up.ra
 FRONTEND_URL = os.environ.get("FRONTEND_URL", "https://rodiprop.gruporodi.com.ar")
 MI_WHATSAPP  = os.environ.get("MI_WHATSAPP", "")
 JWT_SECRET   = os.environ.get("JWT_SECRET", "f41ed397354d4e63f0161af7de29fee29c6a32d85c08cbeeefab6dfca87ee4a1")
+ADMIN_EMAIL  = os.environ.get("ADMIN_EMAIL", "matias@gruporodi.com.ar")
 
 PLANES = {
     "premium": {
@@ -1720,7 +1721,8 @@ def auth_register():
         conn.commit()
         cur.close(); conn.close()
         token = _make_token(user_id)
-        return jsonify({"token": token, "user": {"id": user_id, "email": email, "plan": plan, "nombre": nombre}})
+        is_admin = email.lower() == ADMIN_EMAIL.lower()
+        return jsonify({"token": token, "user": {"id": user_id, "email": email, "plan": plan, "nombre": nombre, "is_admin": is_admin}})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -1750,7 +1752,8 @@ def auth_login():
         if not check_password_hash(pw_hash, password):
             return jsonify({"error": "Contraseña incorrecta"}), 401
         token = _make_token(user_id)
-        return jsonify({"token": token, "user": {"id": user_id, "email": email_db, "plan": plan, "nombre": nombre}})
+        is_admin = email_db.lower() == ADMIN_EMAIL.lower()
+        return jsonify({"token": token, "user": {"id": user_id, "email": email_db, "plan": plan, "nombre": nombre, "is_admin": is_admin}})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -1776,6 +1779,7 @@ def auth_me():
         u = dict(zip(cols, row))
         if u.get("plan_vence"):
             u["plan_vence"] = str(u["plan_vence"])
+        u["is_admin"] = u.get("email", "").lower() == ADMIN_EMAIL.lower()
         return jsonify(u)
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -1832,9 +1836,10 @@ def analytics_zonas():
     try:
         conn = get_conn()
         cur = conn.cursor()
-        cur.execute("SELECT plan FROM usuarios WHERE id=%s", (request.user_id,))
+        cur.execute("SELECT plan, email FROM usuarios WHERE id=%s", (request.user_id,))
         row = cur.fetchone()
-        if not row or row[0] not in ANALYTICS_PLANS:
+        is_admin = row and row[1].lower() == ADMIN_EMAIL.lower()
+        if not row or (row[0] not in ANALYTICS_PLANS and not is_admin):
             cur.close(); conn.close()
             return jsonify({"error": "Requiere plan Analítics o Inversor", "upgrade": True}), 403
         # Zonas con más usuarios buscando + propiedades disponibles
@@ -1897,9 +1902,10 @@ def analytics_precios():
     try:
         conn = get_conn()
         cur = conn.cursor()
-        cur.execute("SELECT plan FROM usuarios WHERE id=%s", (request.user_id,))
+        cur.execute("SELECT plan, email FROM usuarios WHERE id=%s", (request.user_id,))
         row = cur.fetchone()
-        if not row or row[0] not in ANALYTICS_PLANS:
+        is_admin = row and row[1].lower() == ADMIN_EMAIL.lower()
+        if not row or (row[0] not in ANALYTICS_PLANS and not is_admin):
             cur.close(); conn.close()
             return jsonify({"error": "Requiere plan Analítics o Inversor", "upgrade": True}), 403
         cur.execute("""
