@@ -248,7 +248,7 @@ def guardar_props(props):
     guardadas = 0
     for i, p in enumerate(props):
         try:
-            url = p.get("url", "").strip() or (p.get("fuente", "") + "_" + str(i))
+            url = _normalize_url(p.get("url", "").strip()) or (p.get("fuente", "") + "_" + str(i))
             cur.execute(
                 "INSERT INTO propiedades (titulo,precio,moneda,ubicacion,url,imagen,fuente,operacion,atributos)"
                 " VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)"
@@ -281,25 +281,35 @@ def contar_props():
         print("Count error: " + str(e))
         return 0
 
+def _normalize_url(url):
+    """Elimina parámetros de tracking de URLs de portales."""
+    if not url:
+        return url
+    return url.split("?")[0].split("#")[0].rstrip("/")
+
 def cargar_props(zona="", tipo="", operacion="", fuente="", limit=50, offset=0):
     try:
         conn = get_conn()
         cur = conn.cursor()
-        query = "SELECT titulo,precio,moneda,ubicacion,url,imagen,fuente,operacion,atributos FROM propiedades WHERE 1=1"
+        # DISTINCT ON deduplication: por título + ubicación, queda el más reciente
+        inner = ("SELECT DISTINCT ON (LOWER(titulo), LOWER(COALESCE(ubicacion,'')))"
+                 " titulo,precio,moneda,ubicacion,url,imagen,fuente,operacion,atributos,fecha"
+                 " FROM propiedades WHERE 1=1")
         params = []
         if zona:
-            query += " AND (LOWER(ubicacion) LIKE %s OR LOWER(titulo) LIKE %s)"
+            inner += " AND (LOWER(ubicacion) LIKE %s OR LOWER(titulo) LIKE %s)"
             params += ["%" + zona.lower() + "%", "%" + zona.lower() + "%"]
         if tipo:
-            query += " AND LOWER(titulo) LIKE %s"
+            inner += " AND LOWER(titulo) LIKE %s"
             params.append("%" + tipo.lower() + "%")
         if operacion:
-            query += " AND LOWER(operacion) = %s"
+            inner += " AND LOWER(operacion) = %s"
             params.append(operacion.lower())
         if fuente:
-            query += " AND LOWER(fuente) LIKE %s"
+            inner += " AND LOWER(fuente) LIKE %s"
             params.append("%" + fuente.lower() + "%")
-        query += " ORDER BY fecha DESC LIMIT %s OFFSET %s"
+        inner += " ORDER BY LOWER(titulo), LOWER(COALESCE(ubicacion,'')), fecha DESC"
+        query = f"SELECT titulo,precio,moneda,ubicacion,url,imagen,fuente,operacion,atributos FROM ({inner}) d ORDER BY fecha DESC LIMIT %s OFFSET %s"
         params.append(limit)
         params.append(offset)
         cur.execute(query, params)
@@ -429,12 +439,13 @@ def scrape_ml(paginas=3):
                             img = card.select_one("img.poly-component__picture")
                             attrs = card.select(".poly-attributes-list__item")
                             if t and p:
+                                raw_url = l["href"] if l else ""
                                 props.append({
                                     "titulo": t.text.strip(),
                                     "precio": p.text.strip().replace(".", "").replace(",", ""),
                                     "moneda": m.text.strip() if m else "USD",
                                     "ubicacion": u.text.strip() if u else "",
-                                    "url": l["href"] if l else "",
+                                    "url": _normalize_url(raw_url),
                                     "imagen": get_imagen(img, card),
                                     "fuente": "MercadoLibre",
                                     "operacion": op,
