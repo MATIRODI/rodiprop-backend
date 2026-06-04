@@ -675,20 +675,132 @@ def scrape_zonaprop(paginas=10):
                 break
     return props
 
+def _remax_parse_item(item, op):
+    """Extrae una propiedad de un objeto JSON de Remax."""
+    try:
+        tipo = ""
+        pt = item.get("propertyType") or item.get("property_type") or {}
+        if isinstance(pt, dict):
+            tipo = pt.get("name", "") or pt.get("descripcion", "")
+        titulo = item.get("title") or item.get("titulo") or tipo or "Propiedad RE/MAX"
+        precio_raw = (item.get("price") or item.get("precio") or
+                      item.get("listingPrice") or "")
+        precio = re.sub(r'[^0-9]', '', str(precio_raw))
+        moneda = (item.get("currency") or item.get("currencySymbol") or
+                  item.get("moneda") or "USD")
+        if moneda in ("$", "ARS", "Pesos"):
+            moneda = "ARS"
+        loc = item.get("location") or item.get("address") or {}
+        if isinstance(loc, dict):
+            ubicacion = (loc.get("name") or loc.get("nombre") or
+                         loc.get("address") or loc.get("fullAddress") or
+                         str(loc.get("city", "")) or "Córdoba")
+        else:
+            ubicacion = str(loc) if loc else "Córdoba"
+        if not ubicacion or ubicacion == "None":
+            ubicacion = item.get("address", "") or "Córdoba"
+        prop_id = (item.get("id") or item.get("listingId") or
+                   item.get("listing_id") or item.get("codigo") or "")
+        url_slug = item.get("url") or item.get("slug") or item.get("permalink") or ""
+        if url_slug and url_slug.startswith("/"):
+            url_prop = "https://www.remax.com.ar" + url_slug
+        elif url_slug and url_slug.startswith("http"):
+            url_prop = url_slug
+        elif prop_id:
+            url_prop = "https://www.remax.com.ar/propiedades/" + str(prop_id)
+        else:
+            url_prop = ""
+        fotos = item.get("photos") or item.get("images") or item.get("fotos") or []
+        imagen = ""
+        if fotos:
+            f = fotos[0]
+            imagen = f if isinstance(f, str) else (f.get("url") or f.get("src") or f.get("photo") or "")
+        return {
+            "titulo": str(titulo)[:200], "precio": precio, "moneda": moneda,
+            "ubicacion": str(ubicacion)[:200], "url": url_prop, "imagen": imagen,
+            "fuente": "Remax", "operacion": op, "atributos": [],
+        } if (titulo or precio) else None
+    except Exception:
+        return None
+
+
+def _remax_explore_json(data, op, depth=0):
+    """Recorre recursivamente el JSON de Remax buscando arrays de listings."""
+    if depth > 6:
+        return []
+    found = []
+    if isinstance(data, list):
+        for item in data[:200]:
+            if isinstance(item, dict) and ("price" in item or "titulo" in item or
+                                            "propertyType" in item or "listingId" in item):
+                parsed = _remax_parse_item(item, op)
+                if parsed:
+                    found.append(parsed)
+        if found:
+            return found
+        for item in data:
+            sub = _remax_explore_json(item, op, depth + 1)
+            if sub:
+                return sub
+    elif isinstance(data, dict):
+        for key in ["listings", "results", "items", "data", "properties",
+                    "propiedades", "listPostings", "posts", "records"]:
+            if key in data and data[key]:
+                sub = _remax_explore_json(data[key], op, depth + 1)
+                if sub:
+                    return sub
+        for v in data.values():
+            if isinstance(v, (dict, list)):
+                sub = _remax_explore_json(v, op, depth + 1)
+                if sub:
+                    return sub
+    return []
+
+
 def scrape_remax(paginas=10):
     props = []
     s = _http_session()
+
+    # URL patterns Remax Argentina (cambian frecuentemente)
+    URL_PATTERNS = [
+        ("venta",    ["https://www.remax.com.ar/venta/propiedades/en-cordoba",
+                      "https://www.remax.com.ar/comprar/propiedades/cordoba--provincia",
+                      "https://www.remax.com.ar/propiedades-en-venta-en-cordoba-capital.html"]),
+        ("alquiler", ["https://www.remax.com.ar/alquiler/propiedades/en-cordoba",
+                      "https://www.remax.com.ar/alquilar/propiedades/cordoba--provincia",
+                      "https://www.remax.com.ar/propiedades-en-alquiler-en-cordoba-capital.html"]),
+    ]
+
+    # Intentar primero la API REST de Remax (si está disponible)
     try:
         _http_get("https://www.remax.com.ar", sess=s, timeout=10)
     except Exception:
         pass
 
-    for op, slug in [("venta", "comprar"), ("alquiler", "alquilar")]:
+    for op, url_list in URL_PATTERNS:
+        base_url = ""
+        # Detectar qué URL funciona
+        for candidate in url_list:
+            try:
+                html_test, st = _http_get(candidate, sess=s, timeout=15)
+                if st < 400 and len(html_test) > 2000:
+                    base_url = candidate
+                    break
+            except Exception:
+                continue
+
+        if not base_url:
+            print("Remax: no URL funcional para " + op)
+            continue
+
         for i in range(1, paginas + 1):
             try:
-                url = ("https://www.remax.com.ar/" + slug +
-                       "/propiedades/cordoba--provincia" +
-                       ("" if i == 1 else "?page=" + str(i)))
+                if i == 1:
+                    url = base_url
+                else:
+                    sep = "&" if "?" in base_url else "?"
+                    url = base_url + sep + "page=" + str(i)
+
                 html, status = _http_get(url, sess=s, timeout=20)
                 if status in [403, 429]:
                     time.sleep(random.uniform(10, 20))
@@ -696,63 +808,63 @@ def scrape_remax(paginas=10):
                 soup = BeautifulSoup(html, "html.parser")
                 nuevas = []
 
-                # Intentar extraer datos del script __NEXT_DATA__ (Next.js)
-                next_data = soup.find("script", id="__NEXT_DATA__")
-                if next_data and next_data.string:
-                    try:
-                        data = json.loads(next_data.string)
-                        page_props = data.get("props", {}).get("pageProps", {})
-                        listings = (
-                            page_props.get("listings") or
-                            page_props.get("results") or
-                            (page_props.get("initialState") or {}).get("listings", {}).get("data", []) or
-                            []
-                        )
-                        for item in listings:
-                            try:
-                                tipo = (item.get("propertyType") or {}).get("name", "")
-                                titulo = item.get("title") or tipo or "Propiedad"
-                                precio = re.sub(r'[^0-9]', '', str(item.get("price") or ""))
-                                moneda = item.get("currency", "USD")
-                                ubicacion = (
-                                    item.get("address") or
-                                    str((item.get("location") or {}).get("name", "")) or
-                                    "Córdoba"
-                                )
-                                prop_id = item.get("id") or item.get("listingId") or ""
-                                url_prop = ("https://www.remax.com.ar/listing/" + str(prop_id)
-                                            if prop_id else "")
-                                fotos = item.get("photos") or item.get("images") or []
-                                imagen = ""
-                                if fotos:
-                                    primera = fotos[0]
-                                    imagen = (primera if isinstance(primera, str)
-                                              else primera.get("url", primera.get("src", "")))
-                                if titulo or precio:
-                                    nuevas.append({
-                                        "titulo": titulo, "precio": precio, "moneda": moneda,
-                                        "ubicacion": ubicacion, "url": url_prop, "imagen": imagen,
-                                        "fuente": "Remax", "operacion": op, "atributos": [],
-                                    })
-                            except Exception:
-                                pass
-                    except Exception as e:
-                        print("RM JSON parse: " + str(e))
+                # __NEXT_DATA__ — exploración recursiva del JSON completo
+                for script in soup.find_all("script"):
+                    txt = script.string or ""
+                    if "__NEXT_DATA__" in (script.get("id") or "") or (
+                            '"listings"' in txt or '"results"' in txt or '"listPostings"' in txt):
+                        try:
+                            raw = txt.strip()
+                            if raw.startswith("self.__next_f"):
+                                continue
+                            data = json.loads(raw)
+                            found = _remax_explore_json(data, op)
+                            if found:
+                                nuevas.extend(found)
+                                break
+                        except Exception:
+                            pass
 
-                # Fallback HTML
+                # Fallback: scripts con JSON embebido (window.__INITIAL_STATE__ etc.)
                 if not nuevas:
-                    cards = (soup.select(".listing-card") or
-                             soup.select("[class*='ListingCard']") or
-                             soup.select("article[class*='card']") or
-                             soup.select("[class*='property-card']") or
-                             soup.select("article"))
+                    for script in soup.find_all("script"):
+                        txt = script.string or ""
+                        for prefix in ["window.__INITIAL_STATE__=",
+                                       "window.__STATE__=",
+                                       "var initialState="]:
+                            if prefix in txt:
+                                try:
+                                    raw = txt[txt.index(prefix) + len(prefix):].split(";\n")[0].strip()
+                                    data = json.loads(raw)
+                                    found = _remax_explore_json(data, op)
+                                    if found:
+                                        nuevas.extend(found)
+                                        break
+                                except Exception:
+                                    pass
+                        if nuevas:
+                            break
+
+                # Fallback HTML con selectores amplios
+                if not nuevas:
+                    selectors = [
+                        "[class*='ListingCard']", "[class*='listing-card']",
+                        "[class*='property-card']", "[class*='PropertyCard']",
+                        "article.card", "article[data-id]", "article",
+                        "[class*='card'][class*='listing']",
+                    ]
+                    cards = []
+                    for sel in selectors:
+                        cards = soup.select(sel)
+                        if len(cards) >= 3:
+                            break
                     for card in cards:
                         try:
-                            t_el  = card.select_one("h2,h3,[class*='title']")
-                            p_el  = card.select_one("[class*='price']")
-                            u_el  = card.select_one("[class*='address'],[class*='location']")
-                            l_el  = card.select_one("a[href]")
-                            img   = card.select_one("img")
+                            t_el = card.select_one("h2,h3,[class*='title'],[class*='Title']")
+                            p_el = card.select_one("[class*='price'],[class*='Price'],[class*='valor']")
+                            u_el = card.select_one("[class*='address'],[class*='location'],[class*='Address']")
+                            l_el = card.select_one("a[href]")
+                            img  = card.select_one("img")
                             titulo = t_el.text.strip() if t_el else ""
                             precio_raw = p_el.text.strip() if p_el else ""
                             precio = re.sub(r'[^0-9]', '', precio_raw)
@@ -764,19 +876,20 @@ def scrape_remax(paginas=10):
                             if titulo or precio:
                                 nuevas.append({
                                     "titulo": titulo, "precio": precio, "moneda": moneda,
-                                    "ubicacion": ubicacion, "url": url_prop, "imagen": get_imagen(img, card),
+                                    "ubicacion": ubicacion, "url": url_prop,
+                                    "imagen": get_imagen(img, card),
                                     "fuente": "Remax", "operacion": op, "atributos": [],
                                 })
                         except Exception:
                             pass
 
                 props.extend(nuevas)
-                print("RM " + op + " p" + str(i) + ": " + str(len(nuevas)))
+                print("RM " + op + " p" + str(i) + ": " + str(len(nuevas)) + " (url=" + url + ")")
                 if not nuevas:
                     break
-                time.sleep(random.uniform(2, 3))
+                time.sleep(random.uniform(2, 4))
             except Exception as e:
-                print("RM error: " + str(e))
+                print("RM " + op + " error: " + str(e))
                 break
     return props
 
