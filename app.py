@@ -1681,6 +1681,8 @@ def _get_token():
 def require_auth(f):
     @wraps(f)
     def decorated(*args, **kwargs):
+        if request.method == "OPTIONS":
+            return jsonify({}), 200
         token = _get_token()
         user_id = _verify_token(token) if token else None
         if not user_id:
