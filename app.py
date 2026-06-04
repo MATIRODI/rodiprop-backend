@@ -1858,69 +1858,86 @@ def creditos_hipotecarios():
 
 # ─── ANALYTICS ────────────────────────────────────────────────────────────────
 
+def _analytics_check(user_id):
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("SELECT plan, email FROM usuarios WHERE id=%s", (user_id,))
+    row = cur.fetchone()
+    cur.close(); conn.close()
+    is_admin = row and row[1].lower() == ADMIN_EMAIL.lower()
+    allowed = row and (row[0] in ANALYTICS_PLANS or is_admin)
+    return allowed, is_admin
+
 @app.route("/api/analytics/zonas")
 @require_auth
 def analytics_zonas():
     try:
+        allowed, _ = _analytics_check(request.user_id)
+        if not allowed:
+            return jsonify({"error": "Requiere plan Analítics o Inversor", "upgrade": True}), 403
         conn = get_conn()
         cur = conn.cursor()
-        cur.execute("SELECT plan, email FROM usuarios WHERE id=%s", (request.user_id,))
-        row = cur.fetchone()
-        is_admin = row and row[1].lower() == ADMIN_EMAIL.lower()
-        if not row or (row[0] not in ANALYTICS_PLANS and not is_admin):
-            cur.close(); conn.close()
-            return jsonify({"error": "Requiere plan Analítics o Inversor", "upgrade": True}), 403
-        # Zonas con más usuarios buscando + propiedades disponibles
+
+        # Demanda: zonas más buscadas por usuarios registrados
         cur.execute("""
-            SELECT
-                u.zona,
-                COUNT(DISTINCT u.id) AS usuarios_buscando,
-                COUNT(DISTINCT p.id) AS props_disponibles,
-                ROUND(AVG(u.precio_max)::NUMERIC) AS presupuesto_promedio
-            FROM usuarios u
-            LEFT JOIN propiedades p
-                ON p.fecha > NOW() - INTERVAL '30 days'
-                AND LOWER(p.ubicacion) LIKE '%' || LOWER(u.zona) || '%'
-            WHERE u.activo = TRUE AND u.zona != '' AND LENGTH(u.zona) > 2
-            GROUP BY u.zona
-            ORDER BY usuarios_buscando DESC, props_disponibles DESC
+            SELECT zona,
+                COUNT(*) AS usuarios_buscando,
+                ROUND(AVG(CASE WHEN precio_max < 999999999 THEN precio_max::NUMERIC END)) AS presupuesto_promedio
+            FROM usuarios
+            WHERE activo = TRUE AND zona IS NOT NULL AND LENGTH(TRIM(zona)) > 2
+            GROUP BY zona
+            ORDER BY usuarios_buscando DESC
             LIMIT 12
         """)
-        rows = cur.fetchall()
-        # New listings per zone this week vs last week
+        demand_rows = cur.fetchall()
+
+        # Oferta: listados por fuente (más confiable que parsear ubicacion)
+        cur.execute("""
+            SELECT fuente,
+                COUNT(*) AS total,
+                COUNT(CASE WHEN fecha > NOW() - INTERVAL '7 days' THEN 1 END) AS esta_semana,
+                COUNT(CASE WHEN fecha > NOW() - INTERVAL '30 days' THEN 1 END) AS este_mes,
+                MAX(fecha) AS ultima_actualizacion
+            FROM propiedades
+            GROUP BY fuente
+            ORDER BY esta_semana DESC, total DESC
+        """)
+        supply_rows = cur.fetchall()
+
+        # Zonas más mencionadas en propiedades (usando ubicacion limpia)
         cur.execute("""
             SELECT
-                TRIM(SPLIT_PART(ubicacion, ',', 1)) AS zona,
-                COUNT(CASE WHEN fecha > NOW() - INTERVAL '7 days' THEN 1 END) AS esta_semana,
-                COUNT(CASE WHEN fecha BETWEEN NOW() - INTERVAL '14 days' AND NOW() - INTERVAL '7 days' THEN 1 END) AS semana_pasada
+                TRIM(REGEXP_REPLACE(
+                    CASE WHEN ubicacion ~ '[0-9]'
+                         THEN COALESCE(NULLIF(TRIM(SPLIT_PART(ubicacion,',',2)),''), TRIM(SPLIT_PART(ubicacion,',',1)))
+                         ELSE TRIM(SPLIT_PART(ubicacion,',',1))
+                    END,
+                '\\s+', ' ', 'g')) AS zona,
+                COUNT(*) AS total_props
             FROM propiedades
-            WHERE fecha > NOW() - INTERVAL '14 days'
-              AND ubicacion IS NOT NULL AND ubicacion != ''
+            WHERE ubicacion IS NOT NULL AND ubicacion != ''
             GROUP BY zona
-            HAVING COUNT(*) >= 2
-            ORDER BY esta_semana DESC
+            HAVING COUNT(*) >= 3
+              AND LENGTH(TRIM(REGEXP_REPLACE(
+                    CASE WHEN ubicacion ~ '[0-9]'
+                         THEN COALESCE(NULLIF(TRIM(SPLIT_PART(ubicacion,',',2)),''), TRIM(SPLIT_PART(ubicacion,',',1)))
+                         ELSE TRIM(SPLIT_PART(ubicacion,',',1))
+                    END, '\\s+', ' ', 'g'))) > 3
+            ORDER BY total_props DESC
             LIMIT 15
         """)
-        prop_rows = cur.fetchall()
+        zona_rows = cur.fetchall()
         cur.close(); conn.close()
 
-        demanda = []
-        for r in rows:
-            zona, users, props, budget = r
-            demanda.append({"zona": zona, "usuarios_buscando": users,
-                            "props_disponibles": props or 0,
-                            "presupuesto_promedio": float(budget) if budget else 0})
+        demanda = [{"zona": r[0], "usuarios_buscando": r[1],
+                    "presupuesto_promedio": float(r[2]) if r[2] else 0}
+                   for r in demand_rows]
+        oferta_fuentes = [{"fuente": r[0], "total": r[1], "esta_semana": r[2],
+                           "este_mes": r[3], "ultima_actualizacion": str(r[4]) if r[4] else None}
+                          for r in supply_rows]
+        zonas_props = [{"zona": r[0], "total_props": r[1]} for r in zona_rows]
 
-        oferta = []
-        for r in prop_rows:
-            zona, esta, pasada = r
-            delta = esta - (pasada or 0)
-            pct = round((delta / max(pasada or 1, 1)) * 100, 1)
-            oferta.append({"zona": zona, "esta_semana": esta, "semana_pasada": pasada or 0,
-                           "delta": delta, "pct_cambio": pct,
-                           "tendencia": "alza" if pct > 15 else ("baja" if pct < -15 else "estable")})
-
-        return jsonify({"demanda": demanda, "oferta": oferta})
+        return jsonify({"demanda": demanda, "oferta_fuentes": oferta_fuentes, "zonas_props": zonas_props})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -1928,53 +1945,54 @@ def analytics_zonas():
 @require_auth
 def analytics_precios():
     try:
+        allowed, _ = _analytics_check(request.user_id)
+        if not allowed:
+            return jsonify({"error": "Requiere plan Analítics o Inversor", "upgrade": True}), 403
         conn = get_conn()
         cur = conn.cursor()
-        cur.execute("SELECT plan, email FROM usuarios WHERE id=%s", (request.user_id,))
-        row = cur.fetchone()
-        is_admin = row and row[1].lower() == ADMIN_EMAIL.lower()
-        if not row or (row[0] not in ANALYTICS_PLANS and not is_admin):
-            cur.close(); conn.close()
-            return jsonify({"error": "Requiere plan Analítics o Inversor", "upgrade": True}), 403
+        # Precios actuales (ventana amplia para plataforma nueva)
         cur.execute("""
-            WITH recent AS (
+            WITH actual AS (
                 SELECT operacion, moneda,
-                    ROUND(AVG(NULLIF(REGEXP_REPLACE(precio, '[^0-9]', '', 'g'), '')::BIGINT)::NUMERIC) AS avg_precio,
-                    COUNT(*) AS cnt
+                    ROUND(AVG(NULLIF(REGEXP_REPLACE(precio,'[^0-9]','','g'),'')::BIGINT)::NUMERIC) AS avg_precio,
+                    ROUND(PERCENTILE_CONT(0.5) WITHIN GROUP (
+                        ORDER BY NULLIF(REGEXP_REPLACE(precio,'[^0-9]','','g'),'')::BIGINT
+                    )::NUMERIC) AS mediana,
+                    COUNT(*) AS cnt,
+                    MIN(NULLIF(REGEXP_REPLACE(precio,'[^0-9]','','g'),'')::BIGINT) AS precio_min,
+                    MAX(NULLIF(REGEXP_REPLACE(precio,'[^0-9]','','g'),'')::BIGINT) AS precio_max
                 FROM propiedades
-                WHERE fecha > NOW() - INTERVAL '14 days'
-                  AND precio ~ '[0-9]{4,}'
+                WHERE precio ~ '[0-9]{4,}'
+                  AND fecha > NOW() - INTERVAL '60 days'
                 GROUP BY operacion, moneda
             ),
-            anterior AS (
+            historico AS (
                 SELECT operacion, moneda,
-                    ROUND(AVG(NULLIF(REGEXP_REPLACE(precio, '[^0-9]', '', 'g'), '')::BIGINT)::NUMERIC) AS avg_precio,
-                    COUNT(*) AS cnt
+                    ROUND(AVG(NULLIF(REGEXP_REPLACE(precio,'[^0-9]','','g'),'')::BIGINT)::NUMERIC) AS avg_precio
                 FROM propiedades
-                WHERE fecha BETWEEN NOW() - INTERVAL '60 days' AND NOW() - INTERVAL '14 days'
-                  AND precio ~ '[0-9]{4,}'
+                WHERE precio ~ '[0-9]{4,}'
+                  AND fecha BETWEEN NOW() - INTERVAL '120 days' AND NOW() - INTERVAL '60 days'
                 GROUP BY operacion, moneda
             )
-            SELECT r.operacion, r.moneda,
-                   r.avg_precio AS precio_reciente, r.cnt AS cnt_reciente,
-                   a.avg_precio AS precio_anterior, a.cnt AS cnt_anterior,
-                   CASE WHEN a.avg_precio > 0
-                        THEN ROUND(((r.avg_precio - a.avg_precio) / a.avg_precio * 100)::NUMERIC, 1)
+            SELECT a.operacion, a.moneda,
+                   a.avg_precio, a.mediana, a.cnt, a.precio_min, a.precio_max,
+                   h.avg_precio AS avg_historico,
+                   CASE WHEN h.avg_precio > 0
+                        THEN ROUND(((a.avg_precio - h.avg_precio)/h.avg_precio*100)::NUMERIC,1)
                    END AS pct_cambio
-            FROM recent r
-            LEFT JOIN anterior a USING (operacion, moneda)
-            WHERE r.cnt >= 5
-            ORDER BY r.operacion, r.moneda
+            FROM actual a
+            LEFT JOIN historico h USING (operacion, moneda)
+            WHERE a.cnt >= 2
+            ORDER BY a.operacion, a.moneda
         """)
         rows = cur.fetchall()
         cur.close(); conn.close()
-        cols = ["operacion", "moneda", "precio_reciente", "cnt_reciente",
-                "precio_anterior", "cnt_anterior", "pct_cambio"]
+        cols = ["operacion","moneda","avg_precio","mediana","cnt","precio_min","precio_max","avg_historico","pct_cambio"]
         result = []
         for r in rows:
             d = dict(zip(cols, r))
-            for k in ["precio_reciente", "precio_anterior", "pct_cambio"]:
-                if d[k] is not None:
+            for k in cols:
+                if d[k] is not None and hasattr(d[k],'real'):
                     d[k] = float(d[k])
             pct = d.get("pct_cambio")
             d["tendencia"] = "alza" if pct and pct > 3 else ("baja" if pct and pct < -3 else "estable")
@@ -1982,6 +2000,132 @@ def analytics_precios():
         return jsonify({"precios": result})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+# ─── BÚSQUEDA CON IA ──────────────────────────────────────────────────────────
+
+PAID_PLANS = {"premium", "inversor", "analitic"}
+
+@app.route("/api/buscar-ia", methods=["POST", "OPTIONS"])
+@require_auth
+def buscar_ia():
+    if request.method == "OPTIONS":
+        return jsonify({}), 200
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("SELECT plan, email FROM usuarios WHERE id=%s", (request.user_id,))
+    row = cur.fetchone()
+    is_admin = row and row[1].lower() == ADMIN_EMAIL.lower()
+    if not row or (row[0] not in PAID_PLANS and not is_admin):
+        cur.close(); conn.close()
+        return jsonify({"error": "Función exclusiva para usuarios con plan pago", "upgrade": True}), 403
+
+    data = request.get_json() or {}
+    operacion  = data.get("operacion", "").lower().strip()
+    tipo       = data.get("tipo", "").strip()
+    zona       = data.get("zona", "").strip()
+    ambientes  = data.get("ambientes", "").strip()
+    precio_max = int(data.get("precio_max") or 0)
+    moneda     = data.get("moneda", "USD").upper()
+    cochera    = bool(data.get("cochera"))
+    descripcion= data.get("descripcion", "").strip()
+
+    # Construir query de candidatos (filtros amplios)
+    conds = ["fecha > NOW() - INTERVAL '60 days'"]
+    params = []
+    if operacion:
+        conds.append("LOWER(operacion) = %s"); params.append(operacion)
+    if zona:
+        conds.append("LOWER(ubicacion) LIKE %s"); params.append(f"%{zona.lower()}%")
+    if precio_max > 0:
+        conds.append("NULLIF(REGEXP_REPLACE(precio,'[^0-9]','','g'),'')::BIGINT <= %s")
+        params.append(int(precio_max * 1.4))
+
+    where = " AND ".join(conds)
+    try:
+        cur.execute(
+            f"SELECT titulo, precio, moneda, ubicacion, url, imagen, fuente, operacion, atributos"
+            f" FROM propiedades WHERE {where} ORDER BY fecha DESC LIMIT 40",
+            params
+        )
+        rows = cur.fetchall()
+        cur.close(); conn.close()
+    except Exception as e:
+        cur.close(); conn.close()
+        return jsonify({"error": str(e)}), 500
+
+    props = []
+    for r in rows:
+        titulo, precio, mon, ubicacion, url, imagen, fuente, op, atributos_raw = r
+        try:
+            attrs = json.loads(atributos_raw) if atributos_raw else []
+        except Exception:
+            attrs = [atributos_raw] if atributos_raw else []
+        props.append({"titulo": titulo or "", "precio": precio or "", "moneda": mon or "",
+                      "ubicacion": ubicacion or "", "url": url or "", "imagen": imagen or "",
+                      "fuente": fuente or "", "operacion": op or "", "atributos": attrs})
+
+    if not props:
+        return jsonify({"propiedades": [], "ia_resumen": "No encontré propiedades con esos criterios. Probá ampliando zona o presupuesto.", "ia_powered": False})
+
+    # IA ranking via Claude
+    api_key = os.environ.get("ANTHROPIC_API_KEY", "")
+    if api_key:
+        try:
+            import anthropic as anth
+            client = anth.Anthropic(api_key=api_key)
+            criterios_txt = "\n".join(filter(None, [
+                f"- Operación: {operacion}" if operacion else "",
+                f"- Tipo: {tipo}" if tipo else "",
+                f"- Zona: {zona}" if zona else "",
+                f"- Ambientes: {ambientes}" if ambientes else "",
+                f"- Presupuesto máximo: {precio_max:,} {moneda}" if precio_max else "",
+                f"- Con cochera" if cochera else "",
+                f"- Descripción adicional: {descripcion}" if descripcion else "",
+            ]))
+            sample = props[:20]
+            props_txt = "\n".join(
+                f"{i+1}. {p['titulo'][:55]} | {p['precio']} {p['moneda']} | {p['ubicacion'][:45]} | {' · '.join(str(a) for a in p['atributos'][:4])}"
+                for i, p in enumerate(sample)
+            )
+            prompt = (
+                "Sos un asistente inmobiliario experto en Córdoba, Argentina.\n\n"
+                f"El cliente busca:\n{criterios_txt or 'Sin criterios específicos'}\n\n"
+                f"Propiedades disponibles:\n{props_txt}\n\n"
+                f"Seleccioná las mejores 5 opciones para el cliente. "
+                f"Respondé ÚNICAMENTE con JSON válido (sin markdown):\n"
+                f'{{\"ranking\":[{{\"indice\":1,\"explicacion\":\"...\"}}],\"resumen\":\"...\"}}\n'
+                f"Índices del 1 al {len(sample)}. Explicación en 1 oración en español."
+            )
+            resp = client.messages.create(
+                model="claude-haiku-4-5-20251001",
+                max_tokens=700,
+                messages=[{"role":"user","content":prompt}]
+            )
+            raw = resp.content[0].text.strip()
+            if "```" in raw:
+                raw = raw.split("```")[1]
+                if raw.startswith("json"): raw = raw[4:]
+            result_ai = json.loads(raw.strip())
+            ranked = []
+            for item in result_ai.get("ranking", []):
+                idx = item.get("indice", 0) - 1
+                if 0 <= idx < len(sample):
+                    p = dict(sample[idx])
+                    p["ia_explicacion"] = item.get("explicacion", "")
+                    ranked.append(p)
+            # Completar con props no rankeadas si quedan menos de 8
+            seen = {p["url"] for p in ranked}
+            for p in props:
+                if p["url"] not in seen and len(ranked) < 8:
+                    ranked.append(p); seen.add(p["url"])
+            return jsonify({"propiedades": ranked[:8], "ia_resumen": result_ai.get("resumen",""), "ia_powered": True})
+        except Exception as e:
+            print(f"AI error: {e}")
+
+    # Fallback sin IA
+    return jsonify({"propiedades": props[:8],
+                    "ia_resumen": f"Se encontraron {len(props)} propiedades que coinciden con tu búsqueda.",
+                    "ia_powered": False})
 
 # ─── INIT ─────────────────────────────────────────────────────────────────────
 
