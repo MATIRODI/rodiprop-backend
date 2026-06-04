@@ -142,6 +142,15 @@ def detectar_moneda(texto):
         return "USD"
     return "ARS"
 
+_IMG_SKIP = ("logo", "brand", "agency", "inmobiliaria", "sprite", "icon", "arrow",
+             "chevron", "placeholder", "blank", "default", "avatar", "favicon")
+
+def _img_ok(url):
+    if not url or url.startswith("data:") or url in ("", "about:blank", "#"):
+        return False
+    low = url.lower()
+    return not any(s in low for s in _IMG_SKIP)
+
 def get_imagen(img, card=None):
     """Extrae la URL de imagen probando múltiples atributos de lazy loading y srcset."""
     # picture > source[srcset] (e.g. ArgenProp, ZonaProp)
@@ -151,7 +160,7 @@ def get_imagen(img, card=None):
             srcset = src_el.get("srcset", "").strip()
             if srcset:
                 first = srcset.split(",")[0].strip().split()[0]
-                if first and not first.startswith("data:"):
+                if _img_ok(first):
                     return first
     if not img:
         return ""
@@ -159,11 +168,11 @@ def get_imagen(img, card=None):
     srcset = img.get("srcset", "").strip()
     if srcset:
         first = srcset.split(",")[0].strip().split()[0]
-        if first and not first.startswith("data:") and first not in ("", "about:blank", "#"):
+        if _img_ok(first):
             return first
     for attr in ["data-src", "data-lazy-src", "data-original", "data-lazy", "data-image", "src"]:
         val = img.get(attr, "").strip()
-        if val and not val.startswith("data:") and val not in ("", "about:blank", "#"):
+        if _img_ok(val):
             return val
     return ""
 
@@ -226,11 +235,6 @@ def init_db():
             cur.execute(col_sql)
         except Exception:
             pass
-    # Corrección de datos históricos: LaVoz publica en ARS, no USD
-    try:
-        cur.execute("UPDATE propiedades SET moneda='ARS' WHERE fuente='LaVoz' AND moneda='USD'")
-    except Exception:
-        pass
     conn.commit()
     cur.close()
     conn.close()
@@ -277,7 +281,7 @@ def contar_props():
         print("Count error: " + str(e))
         return 0
 
-def cargar_props(zona="", tipo="", operacion="", fuente="", limit=50):
+def cargar_props(zona="", tipo="", operacion="", fuente="", limit=50, offset=0):
     try:
         conn = get_conn()
         cur = conn.cursor()
@@ -295,8 +299,9 @@ def cargar_props(zona="", tipo="", operacion="", fuente="", limit=50):
         if fuente:
             query += " AND LOWER(fuente) LIKE %s"
             params.append("%" + fuente.lower() + "%")
-        query += " ORDER BY fecha DESC LIMIT %s"
+        query += " ORDER BY fecha DESC LIMIT %s OFFSET %s"
         params.append(limit)
+        params.append(offset)
         cur.execute(query, params)
         cols = ["titulo", "precio", "moneda", "ubicacion", "url", "imagen", "fuente", "operacion", "atributos"]
         rows = [dict(zip(cols, row)) for row in cur.fetchall()]
@@ -568,7 +573,8 @@ def scrape_lavoz(paginas=15):
                         l   = card.select_one("a[href]")
                         img = card.select_one("img")
                         titulo = t.text.strip() if t else ""
-                        precio = p.text.strip() if p else ""
+                        precio_raw = p.text.strip() if p else ""
+                        precio = precio_raw
                         href   = l["href"] if l and l.get("href") else ""
                         url_prop = href if href.startswith("http") else "https://clasificados.lavoz.com.ar" + href
                         ubicacion_raw = u.text.strip() if u else ""
@@ -578,11 +584,16 @@ def scrape_lavoz(paginas=15):
                                 ubicacion_raw = partes[-1].replace("-", " ").title()
                         if not ubicacion_raw:
                             ubicacion_raw = "Córdoba"
+                        moneda_lv = detectar_moneda(precio_raw)
+                        imagen_lv = get_imagen(img, card)
+                        # Descartar imágenes que parezcan logos o íconos (muy cortas o con rutas típicas de agencias)
+                        if imagen_lv and any(x in imagen_lv.lower() for x in ["/logo", "/brand", "/agency", "/inmobiliaria", "sprite", "icon", "arrow", "chevron"]):
+                            imagen_lv = ""
                         if titulo or precio:
                             props.append({
-                                "titulo": titulo, "precio": precio, "moneda": "ARS",
+                                "titulo": titulo, "precio": precio, "moneda": moneda_lv,
                                 "ubicacion": ubicacion_raw, "url": url_prop,
-                                "imagen": get_imagen(img, card),
+                                "imagen": imagen_lv,
                                 "fuente": "LaVoz", "operacion": op, "atributos": [],
                             })
                     except Exception:
@@ -1208,6 +1219,7 @@ def propiedades():
         operacion=request.args.get("operacion", ""),
         fuente=request.args.get("fuente", ""),
         limit=request.args.get("limit", 50, type=int),
+        offset=request.args.get("offset", 0, type=int),
     )
     return jsonify({"total": len(props), "propiedades": props})
 
