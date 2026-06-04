@@ -1299,6 +1299,91 @@ def usuarios_stats():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+@app.route("/api/usuarios/perfil")
+def perfil_usuario():
+    email = request.args.get("email", "").strip().lower()
+    if not email:
+        return jsonify({"error": "Email requerido"}), 400
+    try:
+        conn = get_conn()
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT nombre, email, whatsapp, zona, tipo, operacion,"
+            " precio_min, precio_max, ambientes, cocheras, plan,"
+            " alertas_enviadas_count, plan_vence, fecha"
+            " FROM usuarios WHERE email=%s AND activo=TRUE",
+            (email,)
+        )
+        row = cur.fetchone()
+        cur.close()
+        conn.close()
+        if not row:
+            return jsonify({"error": "Usuario no encontrado"}), 404
+        cols = ["nombre", "email", "whatsapp", "zona", "tipo", "operacion",
+                "precio_min", "precio_max", "ambientes", "cocheras", "plan",
+                "alertas_enviadas_count", "plan_vence", "fecha"]
+        u = dict(zip(cols, row))
+        for k in ["plan_vence", "fecha"]:
+            if u.get(k):
+                u[k] = str(u[k])
+        return jsonify(u)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/api/usuarios/actualizar", methods=["POST", "OPTIONS"])
+def actualizar_usuario():
+    if request.method == "OPTIONS":
+        return jsonify({}), 200
+    data = request.get_json() or {}
+    email = data.get("email", "").strip().lower()
+    if not email:
+        return jsonify({"error": "Email requerido"}), 400
+    try:
+        conn = get_conn()
+        cur = conn.cursor()
+        cur.execute(
+            "UPDATE usuarios SET zona=%s, tipo=%s, operacion=%s,"
+            " precio_min=%s, precio_max=%s, ambientes=%s, cocheras=%s, whatsapp=%s"
+            " WHERE email=%s AND activo=TRUE",
+            (data.get("zona", ""), data.get("tipo", ""),
+             data.get("operacion", "venta"),
+             int(data.get("precio_min", 0) or 0),
+             int(data.get("precio_max", 999999999) or 999999999),
+             data.get("ambientes", ""), data.get("cocheras", ""),
+             data.get("whatsapp", ""), email)
+        )
+        updated = cur.rowcount
+        conn.commit()
+        cur.close()
+        conn.close()
+        if not updated:
+            return jsonify({"error": "Usuario no encontrado"}), 404
+        return jsonify({"status": "ok"})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/api/usuarios/baja", methods=["POST", "OPTIONS"])
+def baja_usuario():
+    if request.method == "OPTIONS":
+        return jsonify({}), 200
+    data = request.get_json() or {}
+    email = data.get("email", "").strip().lower()
+    if not email:
+        return jsonify({"error": "Email requerido"}), 400
+    try:
+        conn = get_conn()
+        cur = conn.cursor()
+        cur.execute("UPDATE usuarios SET activo=FALSE WHERE email=%s", (email,))
+        updated = cur.rowcount
+        conn.commit()
+        cur.close()
+        conn.close()
+        if not updated:
+            return jsonify({"error": "Usuario no encontrado"}), 404
+        return jsonify({"status": "ok", "mensaje": "Cuenta desactivada"})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
 # ─── ENDPOINTS MERCADO PAGO ──────────────────────────────────────────────────
 
 @app.route("/api/pagos/crear", methods=["POST", "OPTIONS"])
