@@ -5,3 +5,4 @@ beautifulsoup4==4.12.2
 gunicorn==21.2.0
 pg8000==1.31.1
 scrapling[fetchers]
+anthropic
