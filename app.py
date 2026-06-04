@@ -1,4 +1,4 @@
-from flask import Flask, jsonify, request, redirect
+from flask import Flask, jsonify, request, redirect, Response
 from flask_cors import CORS
 from functools import wraps
 import os, threading, time, requests, random, json, re, urllib.request, urllib.parse, base64
@@ -1272,6 +1272,63 @@ def test_alerta():
 @app.route("/admin")
 def admin_panel():
     return app.send_static_file("admin.html")
+
+@app.route("/propiedad")
+def property_share_page():
+    """OG meta tag page for WhatsApp/social share previews. Redirects to original listing."""
+    prop_url = request.args.get("url", "").strip()
+    titulo = "Propiedad en Córdoba"
+    descripcion = "Encontrá propiedades en Córdoba en RodiProp"
+    imagen = ""
+    redirect_target = prop_url or FRONTEND_URL
+
+    if prop_url:
+        try:
+            conn = get_conn()
+            cur = conn.cursor()
+            cur.execute(
+                "SELECT titulo, precio, moneda, ubicacion, imagen, operacion FROM propiedades WHERE url=%s",
+                (prop_url,)
+            )
+            row = cur.fetchone()
+            cur.close(); conn.close()
+            if row:
+                tit, precio, moneda, ubicacion, img, operacion = row
+                n = re.sub(r'[^0-9]', '', str(precio or ''))
+                precio_fmt = f"{int(n):,}".replace(',', '.') if n else ''
+                moneda_str = moneda or 'USD'
+                tit_clean = (tit or 'Propiedad').replace('"', '&quot;').replace('<','&lt;').replace('>','&gt;')
+                ub_clean = (ubicacion or 'Córdoba').replace('"','&quot;')
+                precio_part = f" - {moneda_str} {precio_fmt}" if precio_fmt else ''
+                titulo = f"{tit_clean}{precio_part}"
+                descripcion = ub_clean
+                imagen = img or ""
+        except Exception:
+            pass
+
+    share_url = f"{BACKEND_URL}/propiedad?url={urllib.parse.quote(prop_url, safe='')}"
+    og_image = f'<meta property="og:image" content="{imagen}">' if imagen else ''
+    html = f"""<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta property="og:title" content="{titulo}">
+<meta property="og:description" content="{descripcion}">
+<meta property="og:type" content="website">
+<meta property="og:url" content="{share_url}">
+<meta property="og:site_name" content="RodiProp">
+{og_image}
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="{titulo}">
+<meta name="twitter:description" content="{descripcion}">
+<meta http-equiv="refresh" content="0;url={redirect_target}">
+</head>
+<body style="font-family:sans-serif;text-align:center;padding:3rem;background:#0A0D14;color:#F4EFE8">
+  <p>Redirigiendo a la propiedad...</p>
+  <p><a href="{redirect_target}" style="color:#C6A24A">Click aquí si no redirige</a></p>
+</body>
+</html>"""
+    return Response(html, mimetype='text/html')
 
 # ─── ENDPOINTS USUARIOS ──────────────────────────────────────────────────────
 
