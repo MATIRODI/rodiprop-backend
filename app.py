@@ -780,6 +780,110 @@ def scrape_remax(paginas=10):
                 break
     return props
 
+def scrape_navent(paginas=10):
+    """Inmuebles.com (grupo Navent) — fuente adicional para Córdoba."""
+    props = []
+    s = _http_session()
+    try:
+        _http_get("https://www.inmuebles.com", sess=s, timeout=10)
+    except Exception:
+        pass
+    for op, slug in [("venta", "venta"), ("alquiler", "alquiler")]:
+        for i in range(1, paginas + 1):
+            try:
+                if i == 1:
+                    url = "https://www.inmuebles.com/propiedades-en-" + slug + "-en-cordoba.html"
+                else:
+                    url = ("https://www.inmuebles.com/propiedades-en-" + slug
+                           + "-en-cordoba-pagina-" + str(i) + ".html")
+                html, status = _http_get(url, sess=s, timeout=20)
+                if status in [403, 429]:
+                    time.sleep(random.uniform(10, 20))
+                    break
+                soup = BeautifulSoup(html, "html.parser")
+                nuevas = []
+
+                next_data = soup.find("script", id="__NEXT_DATA__")
+                if next_data and next_data.string:
+                    try:
+                        data = json.loads(next_data.string)
+                        page_props = data.get("props", {}).get("pageProps", {})
+                        listings = (
+                            page_props.get("listings") or
+                            page_props.get("listPostings") or
+                            page_props.get("results") or []
+                        )
+                        for item in listings:
+                            try:
+                                titulo = (item.get("title") or
+                                          (item.get("propertyType") or {}).get("name", "") or "Propiedad")
+                                precio_raw = item.get("price") or item.get("priceFormatted") or ""
+                                precio = re.sub(r'[^0-9]', '', str(precio_raw))
+                                moneda = item.get("currency", "USD")
+                                ubicacion = (item.get("address") or
+                                             str((item.get("location") or {}).get("name", "")) or "Córdoba")
+                                url_rel = item.get("url", "")
+                                url_prop = ("https://www.inmuebles.com" + url_rel
+                                            if url_rel.startswith("/") else url_rel)
+                                fotos = item.get("photos") or item.get("images") or []
+                                imagen = ""
+                                if fotos:
+                                    primera = fotos[0]
+                                    imagen = (primera if isinstance(primera, str)
+                                              else primera.get("url", primera.get("src", "")))
+                                atributos = []
+                                for attr in (item.get("attributes") or item.get("features") or []):
+                                    if isinstance(attr, dict):
+                                        atributos.append(attr.get("label", "") + ": " + str(attr.get("value", "")))
+                                    elif isinstance(attr, str):
+                                        atributos.append(attr)
+                                if titulo or precio:
+                                    nuevas.append({
+                                        "titulo": titulo, "precio": precio, "moneda": moneda,
+                                        "ubicacion": ubicacion, "url": url_prop, "imagen": imagen,
+                                        "fuente": "Navent", "operacion": op, "atributos": atributos,
+                                    })
+                            except Exception:
+                                pass
+                    except Exception as e:
+                        print("Navent JSON: " + str(e))
+
+                if not nuevas:
+                    cards = soup.select("[data-id]") or soup.select("article[class*='card']")
+                    for card in cards:
+                        try:
+                            t_el = card.select_one("[class*='title'],[class*='Title'],h2,h3")
+                            p_el = card.select_one("[data-price],[class*='price'],[class*='Price']")
+                            u_el = card.select_one("[class*='location'],[class*='address']")
+                            l_el = card.select_one("a[href]")
+                            img  = card.select_one("img")
+                            titulo = t_el.text.strip() if t_el else ""
+                            precio_raw = (p_el.get("data-price", "") or p_el.text) if p_el else ""
+                            precio = re.sub(r'[^0-9]', '', precio_raw)
+                            moneda = detectar_moneda(precio_raw)
+                            ubicacion = u_el.text.strip() if u_el else "Córdoba"
+                            href = l_el["href"] if l_el else ""
+                            url_prop = (href if href.startswith("http")
+                                        else "https://www.inmuebles.com" + href)
+                            if titulo or precio:
+                                nuevas.append({
+                                    "titulo": titulo, "precio": precio, "moneda": moneda,
+                                    "ubicacion": ubicacion, "url": url_prop, "imagen": get_imagen(img, card),
+                                    "fuente": "Navent", "operacion": op, "atributos": [],
+                                })
+                        except Exception:
+                            pass
+
+                props.extend(nuevas)
+                print("Navent " + op + " p" + str(i) + ": " + str(len(nuevas)))
+                if not nuevas:
+                    break
+                time.sleep(random.uniform(2, 3))
+            except Exception as e:
+                print("Navent error: " + str(e))
+                break
+    return props
+
 # ─── ALERTAS ─────────────────────────────────────────────────────────────────
 
 def chequear_alertas():
@@ -916,6 +1020,7 @@ def run_scraper():
         (scrape_lavoz,    "LaVoz",    {"paginas": 15}),
         (scrape_zonaprop, "ZonaProp", {"paginas": 10}),
         (scrape_remax,    "Remax",    {"paginas": 10}),
+        (scrape_navent,   "Navent",   {"paginas": 10}),
     ]:
         try:
             r = fn(**kwargs)
@@ -942,7 +1047,7 @@ def auto_scraper():
 def home():
     return jsonify({
         "status": "RodiProp API OK",
-        "version": "9.0",
+        "version": "10.0",
         "pg_host": PG_HOST,
         "total": contar_props(),
         "mp": "activo" if MP_ACCESS_TOKEN else "pendiente-credenciales",
