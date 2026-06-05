@@ -1,0 +1,22 @@
+[phases.setup]
+nixPkgs = [
+    "chromium",
+    "nss",
+    "glib",
+    "xorg.libX11",
+    "xorg.libXcomposite",
+    "xorg.libXdamage",
+    "xorg.libXrandr",
+    "xorg.libxcb",
+    "mesa",
+    "expat",
+    "xorg.libXext",
+    "xorg.libXfixes",
+    "cups",
+    "dbus",
+    "at-spi2-core",
+]
+
+[variables]
+PUPPETEER_SKIP_CHROMIUM_DOWNLOAD = "true"
+NODE_ENV = "production"
