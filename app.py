@@ -468,54 +468,87 @@ def notificar_pago_whatsapp(nombre, email, plan, monto):
 # ─── SCRAPERS ────────────────────────────────────────────────────────────────
 
 LOCALIDADES_CORDOBA = [
-    "cordoba",
+    # Capital y Gran Córdoba
+    "cordoba", "cordoba-capital",
+    # Sierras Chicas
     "villa-allende", "unquillo", "salsipuedes", "mendiolaza", "la-calera",
-    "rio-ceballos", "malagueno", "villa-carlos-paz", "cosquin", "alta-gracia",
-    "jesus-maria", "colonia-caroya",
+    "rio-ceballos", "malagueno", "bosque-alegre", "agua-de-oro",
+    # Valle de Punilla
+    "villa-carlos-paz", "cosquin", "la-falda", "la-cumbre", "capilla-del-monte",
+    "huerta-grande", "los-cocos", "villa-giardino",
+    # Traslasierra
+    "mina-clavero", "nono", "villa-dolores",
+    # Alta Gracia y Calamuchita
+    "alta-gracia", "villa-general-belgrano", "santa-rosa-de-calamuchita",
+    "embalse", "los-reartes", "potrero-de-garay",
+    # Colón
+    "jesus-maria", "colonia-caroya", "sinsacate", "villa-del-totoral",
+    # Interior Córdoba
     "rio-cuarto", "villa-maria", "san-francisco", "rio-tercero", "bell-ville",
-    "marcos-juarez", "morteros", "arroyito",
-    "la-falda", "la-cumbre", "capilla-del-monte", "mina-clavero",
-    "villa-general-belgrano", "potrero-de-garay",
+    "marcos-juarez", "morteros", "arroyito", "dean-funes", "villa-de-maria",
+    "laboulaye", "villa-nueva", "pilar-cordoba",
 ]
 
-def scrape_ml(paginas=3):
+def scrape_ml(paginas=20):
+    """Scraper ML con múltiples categorías para superar el límite de 1000 resultados por búsqueda."""
     props = []
+    # Categorías ML para multiplicar coverage: cada una tiene su propio pool de 1000
+    ML_CATEGORIAS = [
+        ("departamentos", "departamentos"),
+        ("casas",         "casas"),
+        ("ph",            "ph"),
+        ("locales-comerciales", "locales-y-oficinas"),
+        ("terrenos",      "terrenos-y-lotes"),
+        ("countries-y-barrios-cerrados", "countries-y-barrios-cerrados"),
+    ]
     for op in ["venta", "alquiler"]:
         for localidad in LOCALIDADES_CORDOBA:
-            for i in range(paginas):
-                try:
-                    url = ("https://inmuebles.mercadolibre.com.ar/" + op + "/" + localidad
-                           + "/_Desde_" + str(i * 48 + 1) + "_DisplayType_G")
-                    html, status = _http_get(url, timeout=15)
-                    soup = BeautifulSoup(html, "html.parser")
-                    for card in soup.select(".ui-search-layout__item"):
-                        try:
-                            t   = card.select_one(".poly-component__title")
-                            p   = card.select_one(".andes-money-amount__fraction")
-                            m   = card.select_one(".andes-money-amount__currency-symbol")
-                            u   = card.select_one(".poly-component__location")
-                            l   = card.select_one("a.poly-component__title")
-                            img = card.select_one("img.poly-component__picture")
-                            attrs = card.select(".poly-attributes-list__item")
-                            if t and p:
-                                raw_url = l["href"] if l else ""
-                                props.append({
-                                    "titulo": t.text.strip(),
-                                    "precio": p.text.strip().replace(".", "").replace(",", ""),
-                                    "moneda": m.text.strip() if m else "USD",
-                                    "ubicacion": u.text.strip() if u else "",
-                                    "url": _normalize_url(raw_url),
-                                    "imagen": get_imagen(img, card),
-                                    "fuente": "MercadoLibre",
-                                    "operacion": op,
-                                    "atributos": [a.text.strip() for a in attrs],
-                                })
-                        except Exception:
-                            pass
-                    print("ML " + op + "/" + localidad + " p" + str(i + 1) + ": " + str(len(props)))
-                    time.sleep(random.uniform(1, 2))
-                except Exception as e:
-                    print("ML " + localidad + " error: " + str(e))
+            for cat_slug, _ in ML_CATEGORIAS:
+                prev_len = len(props)
+                for i in range(paginas):
+                    try:
+                        url = ("https://inmuebles.mercadolibre.com.ar/" + cat_slug + "-en-" + op + "/"
+                               + localidad + "/_Desde_" + str(i * 48 + 1) + "_DisplayType_G")
+                        html, status = _http_get(url, timeout=15)
+                        if status in [403, 429]:
+                            time.sleep(random.uniform(5, 10))
+                            break
+                        soup = BeautifulSoup(html, "html.parser")
+                        cards = soup.select(".ui-search-layout__item")
+                        if not cards:
+                            break
+                        for card in cards:
+                            try:
+                                t   = card.select_one(".poly-component__title")
+                                p   = card.select_one(".andes-money-amount__fraction")
+                                m   = card.select_one(".andes-money-amount__currency-symbol")
+                                u   = card.select_one(".poly-component__location")
+                                l   = card.select_one("a.poly-component__title")
+                                img = card.select_one("img.poly-component__picture") or card.select_one("img")
+                                attrs = card.select(".poly-attributes-list__item")
+                                if t and p:
+                                    raw_url = l["href"] if l else ""
+                                    props.append({
+                                        "titulo": t.text.strip(),
+                                        "precio": p.text.strip().replace(".", "").replace(",", ""),
+                                        "moneda": m.text.strip() if m else "USD",
+                                        "ubicacion": u.text.strip() if u else localidad.replace("-", " ").title(),
+                                        "url": _normalize_url(raw_url),
+                                        "imagen": get_imagen(img, card),
+                                        "fuente": "MercadoLibre",
+                                        "operacion": op,
+                                        "atributos": [a.text.strip() for a in attrs],
+                                    })
+                            except Exception:
+                                pass
+                        added = len(props) - prev_len
+                        print("ML " + op + "/" + cat_slug + "/" + localidad + " p" + str(i+1) + " +" + str(added))
+                        if len(cards) < 10:
+                            break
+                        time.sleep(random.uniform(0.8, 1.5))
+                    except Exception as e:
+                        print("ML " + localidad + "/" + cat_slug + " error: " + str(e))
+                        break
     return props
 
 def scrape_ap(paginas=20):
@@ -528,20 +561,21 @@ def scrape_ap(paginas=20):
 
     AP_LOCALIDADES = [
         ("cordoba", "cordoba-capital"),
-        ("villa-allende", "villa-allende"),
-        ("unquillo", "unquillo"),
-        ("salsipuedes", "salsipuedes"),
-        ("mendiolaza", "mendiolaza"),
-        ("la-calera", "la-calera"),
-        ("rio-ceballos", "rio-ceballos"),
-        ("villa-carlos-paz", "villa-carlos-paz"),
-        ("cosquin", "cosquin"),
+        ("villa-allende", "villa-allende"), ("unquillo", "unquillo"),
+        ("salsipuedes", "salsipuedes"), ("mendiolaza", "mendiolaza"),
+        ("la-calera", "la-calera"), ("rio-ceballos", "rio-ceballos"),
+        ("malagueno", "malagueno"), ("agua-de-oro", "agua-de-oro"),
+        ("villa-carlos-paz", "villa-carlos-paz"), ("cosquin", "cosquin"),
+        ("la-falda", "la-falda"), ("la-cumbre", "la-cumbre"),
+        ("capilla-del-monte", "capilla-del-monte"), ("huerta-grande", "huerta-grande"),
         ("alta-gracia", "alta-gracia"),
-        ("jesus-maria", "jesus-maria"),
-        ("colonia-caroya", "colonia-caroya"),
-        ("rio-cuarto", "rio-cuarto"),
-        ("villa-maria", "villa-maria"),
-        ("malagueño", "malagueño"),
+        ("villa-general-belgrano", "villa-general-belgrano"),
+        ("santa-rosa-de-calamuchita", "santa-rosa-de-calamuchita"),
+        ("jesus-maria", "jesus-maria"), ("colonia-caroya", "colonia-caroya"),
+        ("rio-cuarto", "rio-cuarto"), ("villa-maria", "villa-maria"),
+        ("san-francisco", "san-francisco"), ("rio-tercero", "rio-tercero"),
+        ("bell-ville", "bell-ville"), ("dean-funes", "dean-funes"),
+        ("mina-clavero", "mina-clavero"), ("villa-dolores", "villa-dolores"),
     ]
 
     def parsear_cards(cards, op):
@@ -1250,12 +1284,12 @@ def run_scraper():
     print("Scraper iniciando...")
     todas = []
     for fn, name, kwargs in [
-        (scrape_ml,       "ML",       {"paginas": 5}),
-        (scrape_ap,       "AP",       {}),
-        (scrape_lavoz,    "LaVoz",    {"paginas": 15}),
-        (scrape_zonaprop, "ZonaProp", {"paginas": 10}),
-        (scrape_remax,    "Remax",    {"paginas": 10}),
-        (scrape_navent,   "Navent",   {"paginas": 10}),
+        (scrape_ml,       "ML",       {"paginas": 20}),
+        (scrape_ap,       "AP",       {"paginas": 30}),
+        (scrape_lavoz,    "LaVoz",    {"paginas": 30}),
+        (scrape_zonaprop, "ZonaProp", {"paginas": 20}),
+        (scrape_remax,    "Remax",    {"paginas": 20}),
+        (scrape_navent,   "Navent",   {"paginas": 20}),
     ]:
         try:
             r = fn(**kwargs)
