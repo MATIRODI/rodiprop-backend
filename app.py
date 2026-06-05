@@ -151,6 +151,14 @@ def _img_ok(url):
     low = url.lower()
     return not any(s in low for s in _IMG_SKIP)
 
+def _get_bg_image(card):
+    """Extrae URL de background-image de estilos inline."""
+    for el in card.select("[style*='background-image']"):
+        m = re.search(r"background-image\s*:\s*url\(['\"]?([^'\")\s]+)['\"]?\)", el.get("style", ""))
+        if m and _img_ok(m.group(1)):
+            return m.group(1)
+    return ""
+
 def get_imagen(img, card=None):
     """Extrae la URL de imagen probando múltiples atributos de lazy loading y srcset."""
     # picture > source[srcset] (e.g. ArgenProp, ZonaProp)
@@ -163,6 +171,11 @@ def get_imagen(img, card=None):
                 if _img_ok(first):
                     return first
     if not img:
+        # Fallback: background-image CSS
+        if card:
+            bg = _get_bg_image(card)
+            if bg:
+                return bg
         return ""
     # srcset on img element
     srcset = img.get("srcset", "").strip()
@@ -170,10 +183,15 @@ def get_imagen(img, card=None):
         first = srcset.split(",")[0].strip().split()[0]
         if _img_ok(first):
             return first
-    for attr in ["data-src", "data-lazy-src", "data-original", "data-lazy", "data-image", "src"]:
+    for attr in ["data-src", "data-lazy-src", "data-original", "data-lazy", "data-image", "data-bg", "src"]:
         val = img.get(attr, "").strip()
         if _img_ok(val):
             return val
+    # Last resort: background-image CSS
+    if card:
+        bg = _get_bg_image(card)
+        if bg:
+            return bg
     return ""
 
 def get_conn():
@@ -287,11 +305,45 @@ def _normalize_url(url):
         return url
     return url.split("?")[0].split("#")[0].rstrip("/")
 
+# Coordenadas pre-calculadas de barrios y localidades de Córdoba
+_CBA_COORDS = {
+    "centro": (-31.4170, -64.1832), "nueva córdoba": (-31.4222, -64.1845),
+    "güemes": (-31.4219, -64.1816), "alberdi": (-31.4065, -64.2185),
+    "alta córdoba": (-31.4005, -64.1815), "cofico": (-31.4011, -64.2003),
+    "san vicente": (-31.4350, -64.1660), "general paz": (-31.4125, -64.2230),
+    "urca": (-31.4050, -64.2490), "pueyrredón": (-31.3990, -64.1720),
+    "cerro de las rosas": (-31.3700, -64.2200), "villa belgrano": (-31.3500, -64.2300),
+    "arguello": (-31.3500, -64.2500), "argüello": (-31.3500, -64.2500),
+    "villa del parque": (-31.3795, -64.2090), "jardín": (-31.3800, -64.2100),
+    "palermo": (-31.4095, -64.2155), "colinas": (-31.3650, -64.2350),
+    "yofre": (-31.3750, -64.1870), "ferreyra": (-31.4510, -64.1450),
+    "san martin": (-31.4200, -64.1600), "san roque": (-31.4350, -64.1780),
+    "santa isabel": (-31.3900, -64.1700), "villa allende": (-31.2920, -64.2960),
+    "mendiolaza": (-31.2750, -64.3000), "unquillo": (-31.2500, -64.3150),
+    "salsipuedes": (-31.2150, -64.3050), "la calera": (-31.3450, -64.3350),
+    "río ceballos": (-31.1750, -64.3200), "malagueño": (-31.4650, -64.3700),
+    "villa carlos paz": (-31.4220, -64.5020), "cosquín": (-31.2400, -64.4700),
+    "alta gracia": (-31.6580, -64.4280), "jesús maría": (-30.9820, -64.0940),
+    "jesus maria": (-30.9820, -64.0940), "colonia caroya": (-30.9300, -64.0900),
+    "río cuarto": (-33.1300, -64.3500), "villa maría": (-32.4100, -63.2400),
+    "capital": (-31.4170, -64.1832), "córdoba": (-31.4170, -64.1832),
+}
+
+def geocode_cba(ubicacion):
+    """Devuelve (lat, lng) para una ubicación de Córdoba usando lookup pre-calculado."""
+    if not ubicacion:
+        return None, None
+    low = ubicacion.lower()
+    for barrio, coords in _CBA_COORDS.items():
+        if barrio in low:
+            return coords
+    return None, None
+
 def cargar_props(zona="", tipo="", operacion="", fuente="", limit=50, offset=0):
     try:
         conn = get_conn()
         cur = conn.cursor()
-        # DISTINCT ON deduplication: por título + ubicación, queda el más reciente
+        # 1er nivel: DISTINCT ON por título+ubicación para deduplicar
         inner = ("SELECT DISTINCT ON (LOWER(titulo), LOWER(COALESCE(ubicacion,'')))"
                  " titulo,precio,moneda,ubicacion,url,imagen,fuente,operacion,atributos,fecha"
                  " FROM propiedades WHERE 1=1")
@@ -309,7 +361,14 @@ def cargar_props(zona="", tipo="", operacion="", fuente="", limit=50, offset=0):
             inner += " AND LOWER(fuente) LIKE %s"
             params.append("%" + fuente.lower() + "%")
         inner += " ORDER BY LOWER(titulo), LOWER(COALESCE(ubicacion,'')), fecha DESC"
-        query = f"SELECT titulo,precio,moneda,ubicacion,url,imagen,fuente,operacion,atributos FROM ({inner}) d ORDER BY fecha DESC LIMIT %s OFFSET %s"
+        # 2do nivel: round-robin por fuente usando ROW_NUMBER para intercalar portales
+        query = (
+            "SELECT titulo,precio,moneda,ubicacion,url,imagen,fuente,operacion,atributos"
+            " FROM (SELECT *, ROW_NUMBER() OVER (PARTITION BY fuente ORDER BY fecha DESC) AS rn"
+            " FROM (" + inner + ") d) numbered"
+            " ORDER BY rn, fuente"
+            " LIMIT %s OFFSET %s"
+        )
         params.append(limit)
         params.append(offset)
         cur.execute(query, params)
@@ -582,7 +641,17 @@ def scrape_lavoz(paginas=15):
                         p   = card.select_one("[class*='price']") or card.select_one("[class*='precio']")
                         u   = card.select_one("[class*='location']") or card.select_one("[class*='address']")
                         l   = card.select_one("a[href]")
-                        img = card.select_one("img")
+                        # Intentar selectores específicos para foto principal antes del genérico
+                        img = (card.select_one("[class*='foto'] img") or
+                               card.select_one("[class*='photo'] img") or
+                               card.select_one("[class*='imagen'] img") or
+                               card.select_one("[class*='gallery'] img") or
+                               card.select_one("[class*='thumb'] img") or
+                               card.select_one("figure img") or
+                               card.select_one("img[src*='clasificados'], img[data-src*='clasificados']") or
+                               card.select_one("img[src*='lavoz'], img[data-src*='lavoz']") or
+                               card.select_one("img[src*='http'], img[data-src*='http']") or
+                               card.select_one("img"))
                         titulo = t.text.strip() if t else ""
                         precio_raw = p.text.strip() if p else ""
                         precio = precio_raw
@@ -597,9 +666,6 @@ def scrape_lavoz(paginas=15):
                             ubicacion_raw = "Córdoba"
                         moneda_lv = detectar_moneda(precio_raw)
                         imagen_lv = get_imagen(img, card)
-                        # Descartar imágenes que parezcan logos o íconos (muy cortas o con rutas típicas de agencias)
-                        if imagen_lv and any(x in imagen_lv.lower() for x in ["/logo", "/brand", "/agency", "/inmobiliaria", "sprite", "icon", "arrow", "chevron"]):
-                            imagen_lv = ""
                         if titulo or precio:
                             props.append({
                                 "titulo": titulo, "precio": precio, "moneda": moneda_lv,
@@ -1233,6 +1299,22 @@ def propiedades():
         offset=request.args.get("offset", 0, type=int),
     )
     return jsonify({"total": len(props), "propiedades": props})
+
+@app.route("/api/propiedades/mapa")
+@require_auth
+def propiedades_mapa():
+    zona = request.args.get("zona", "")
+    op = request.args.get("operacion", "")
+    tipo = request.args.get("tipo", "")
+    props = cargar_props(zona=zona, tipo=tipo, operacion=op, limit=300)
+    result = []
+    for p in props:
+        lat, lng = geocode_cba(p.get("ubicacion", ""))
+        if lat and lng:
+            p["lat"] = lat
+            p["lng"] = lng
+            result.append(p)
+    return jsonify({"propiedades": result})
 
 @app.route("/api/stats")
 def stats():
