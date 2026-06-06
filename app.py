@@ -197,7 +197,7 @@ def get_imagen(img, card=None):
 def get_conn():
     import pg8000.dbapi as pg
     print("Connecting to " + PG_HOST + ":" + str(PG_PORT) + " db=" + PG_DB)
-    return pg.connect(user=PG_USER, password=PG_PASS, host=PG_HOST, port=PG_PORT, database=PG_DB)
+    return pg.connect(user=PG_USER, password=PG_PASS, host=PG_HOST, port=PG_PORT, database=PG_DB, timeout=10)
 
 # ─── AUTH ────────────────────────────────────────────────────────────────────
 
