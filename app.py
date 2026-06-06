@@ -503,7 +503,11 @@ def scrape_ml(paginas=20):
     ]
     for op in ["venta", "alquiler"]:
         for localidad in LOCALIDADES_CORDOBA:
+            if len(props) > 50000:  # límite de memoria: máx 50k props por corrida
+                break
             for cat_slug, _ in ML_CATEGORIAS:
+                if len(props) > 50000:
+                    break
                 prev_len = len(props)
                 for i in range(paginas):
                     try:
@@ -1282,7 +1286,6 @@ def chequear_alertas():
 
 def run_scraper():
     print("Scraper iniciando...")
-    todas = []
     for fn, name, kwargs in [
         (scrape_ml,       "ML",       {"paginas": 20}),
         (scrape_ap,       "AP",       {"paginas": 30}),
@@ -1293,12 +1296,11 @@ def run_scraper():
     ]:
         try:
             r = fn(**kwargs)
-            todas.extend(r)
-            print(name + ": " + str(len(r)))
+            guardar_props(r)   # guarda y libera memoria inmediatamente
+            print(name + ": " + str(len(r)) + " | DB total: " + str(contar_props()))
         except Exception as e:
             print(name + " fail: " + str(e))
-    guardar_props(todas)
-    print("Total DB: " + str(contar_props()))
+    print("Scraper completo. Total DB: " + str(contar_props()))
 
 def auto_scraper():
     time.sleep(10)
